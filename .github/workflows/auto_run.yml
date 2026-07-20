@@ -35,3 +35,4 @@ jobs:
           git add 통합_맞춤공고.xlsx 수동확인_필요목록.xlsx 알림내역_기록장부.txt || true
           git commit -m "데이터 수집 로봇: 장부 및 결과 엑셀 최신화 완료" || echo "새로운 변경사항이 없습니다."
           git push
+
