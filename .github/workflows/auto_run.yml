@@ -1,40 +1,37 @@
-name: 🚀 공고 자동 수집 로봇 (매일 09시~17시, 1시간 간격)
+name: 🚀 공고 자동 수집 로봇 (하루 4회 정기 순찰)
 
 on:
   schedule:
-    # 한국 시간(KST) 기준 09시부터 17시까지 1시간 간격 작동
-    # (UTC 기준: 00시 ~ 08시)
-    - cron: '0 0-8 * * *'
-  workflow_dispatch: # 수동으로도 버튼을 눌러 실행할 수 있게 하는 옵션
-
-permissions:
-  contents: write
+    # 한국 시간 기준: 09시, 12시, 15시, 18시 (하루 총 4회 가동)
+    # UTC 기준: 00시, 03시, 06시, 09시
+    - cron: '0 0,3,6,9 * * *'
+  workflow_dispatch:
 
 jobs:
   run-auto-scraper:
     runs-on: ubuntu-latest
+
     steps:
-      - name: 1. 내 저장소 코드 불러오기
-        uses: actions/checkout@v3
+      - name: 1. 저장소 코드 가져오기
+        uses: actions/checkout@v4
 
-      - name: 2. 파이썬 환경 세팅
-        uses: actions/setup-python@v4
+      - name: 2. 파이썬 환경 설정
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-python-version: '3.10'
 
-      - name: 3. 필요 도구(설명서) 설치
-        run: pip install -r requirements.txt
-
-      - name: 4. 시스템 가동 및 텔레그램 알림 발송!
-        run: python main.py 10 "안전, 모집, 지정, 공고, 용역"
-
-      - name: 5. 비밀 장부 및 엑셀 결과 클라우드에 영구 저장
+      - name: 3. 필수 패키지 설치
         run: |
-          git config --global user.name "GitHub Actions Bot"
-          git config --global user.email "actions@github.com"
-          git add 통합_맞춤공고.xlsx 수동확인_필요목록.xlsx 알림내역_기록장부.txt || true
-          git commit -m "데이터 수집 로봇: 장부 및 결과 엑셀 최신화 완료" || echo "새로운 변경사항이 없습니다."
-          git push
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
+      - name: 4. 공고 자동 수집 및 알림 실행
+        run: |
+          python main.py
 
-
+      - name: 5. 최신 엑셀 및 알림 장부 깃허브에 저장
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add 통합_맞춤공고.xlsx 알림내역_기록장부.txt
+          git diff --quiet && git diff --staged --quiet || (git commit -m "🤖 [자동업데이트] 신규 맞춤공고 수집 완료" && git push)
