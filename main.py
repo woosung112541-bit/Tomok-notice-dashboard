@@ -254,5 +254,24 @@ else:
     print(f"\n[종료] 수집 완료. 조건에 부합하는 신규 데이터가 없습니다.")
 
 if empty_sites:
-    df_empty = pd.DataFrame(empty_sites)
-    df_empty.to_excel(CHECK_EXCEL, index=False)
+    # 1. 상단에서 만든 함수로 검증 완료된 사이트/기관 목록 불러오기
+    verified_sites = load_verified_sites()
+    
+    # 2. 과거에 검증 성공했던 기관('출처기관')은 추가검토 목록에서 자동 제외
+    filtered_empty_sites = [
+        site for site in empty_sites 
+        if site['출처기관'] not in verified_sites
+    ]
+    
+    # 3. 제외하고도 진짜 검증 필요 항목이 남아있다면 엑셀 파일 생성
+    if filtered_empty_sites:
+        df_empty = pd.DataFrame(filtered_empty_sites)
+        df_empty.to_excel(CHECK_EXCEL, index=False)
+        print(f"[안내] 검증 완료 기관을 제외한 {len(filtered_empty_sites)}개 사이트만 수동확인 목록에 저장되었습니다.")
+    else:
+        # 모든 미수집 기관이 이미 검증 완료된 곳이라면 기존 수동확인 파일 삭제
+        if os.path.exists(CHECK_EXCEL):
+            os.remove(CHECK_EXCEL)
+        print("[안내] 미수집 사이트가 모두 검증 완료된 기관이므로 수동확인 목록이 생략되었습니다.")
+
+
