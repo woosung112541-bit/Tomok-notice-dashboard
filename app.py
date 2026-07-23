@@ -24,19 +24,40 @@ st.sidebar.divider()
 if menu == "🚀 공고 자동 수집":
     st.title("🚀 공고 자동 수집 & 실시간 검색")
 
-    # 1. 수집 실행 버튼 (파이썬 가상환경 경로 명시 적용)
+    # 1. 수동 수집 버튼 (실시간 프로그레스 로그 표시 적용)
     if st.button("🚀 지금 즉시 공고 수집 실행", type="primary"):
-        with st.spinner("공고를 수집 중입니다... 잠시만 기다려주세요."):
+        # 실시간 진행상황 창 생성
+        with st.status("🚀 공고를 수집 중입니다... (실시간 진행 로그)", expanded=True) as status:
             try:
-                # sys.executable을 사용해 현재 실행 중인 정확한 파이썬 엔진으로 main.py 호출
-                result = subprocess.run([sys.executable, "main.py"], capture_output=True, text=True, encoding='utf-8')
-                if result.returncode == 0:
-                    st.success("수집이 완벽하게 완료되었습니다!")
+                # main.py의 print 출력을 실시간으로 한 줄씩 한 줄씩 읽어오는 Popen 프로세스 가동
+                process = subprocess.Popen(
+                    [sys.executable, "main.py"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding='utf-8',
+                    bufsize=1
+                )
+
+                # 한 줄씩 읽어서 화면에 출력
+                for line in iter(process.stdout.readline, ''):
+                    if line:
+                        st.write(line.strip())
+
+                process.wait()
+
+                if process.returncode == 0:
+                    status.update(label="✅ 공고 수집 완료!", state="complete", expanded=False)
+                    st.success("수집이 성공적으로 마무리되었습니다!")
                 else:
-                    st.error(f"수집 중 오류 발생: {result.stderr}")
+                    status.update(label="❌ 수집 실패 (오류 발생)", state="error", expanded=True)
+                    st.error("수집 도중 오류가 발생했습니다.")
+
             except Exception as e:
-                st.error(f"실행 명령어 오류: {e}")
-            st.rerun()
+                status.update(label="❌ 실행 시스템 오류", state="error", expanded=True)
+                st.error(f"실행 중 예외 발생: {e}")
+        
+        st.rerun()
 
     st.divider()
 
@@ -71,9 +92,9 @@ if menu == "🚀 공고 자동 수집":
 
         if not filtered_df.empty and '출처' in filtered_df.columns and filtered_df.iloc[0]['출처'] != '-':
 
-            # 보관함에 담을 공고 선택 (Multiselect 방식을 통해 안정성 극대화)
+            # 보관함에 담을 공고 선택
             selected_indices = st.multiselect(
-                "📥 보관함에 저장할 공고를 아래에서 선택하세요:",
+                "📥 보관함에 저장할 공고를 아래 목록에서 선택하세요:",
                 options=filtered_df.index,
                 format_func=lambda x: f"[{filtered_df.loc[x, '출처']}] {filtered_df.loc[x, '공고제목']} ({filtered_df.loc[x, '등록일']})"
             )
