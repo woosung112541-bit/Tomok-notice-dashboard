@@ -1,11 +1,7 @@
-name: 🚀 공고 자동 수집 로봇 (하루 4회 정기 순찰)
+name: 🚀 공고 수집 로봇 (수동 전용)
 
 on:
-  schedule:
-    # 한국 시간 기준: 09시, 12시, 15시, 18시 (하루 총 4회 가동)
-    # UTC 기준: 00시, 03시, 06시, 09시
-    - cron: '0 0,3,6,9 * * *'
-  workflow_dispatch:
+  workflow_dispatch: # 수동 실행 버튼만 남겨둠 (자동 스케줄 제거)
 
 jobs:
   run-auto-scraper:
@@ -18,7 +14,7 @@ jobs:
       - name: 2. 파이썬 환경 설정
         uses: actions/setup-python@v5
         with:
-          python-python-version: '3.10'
+          python-version: '3.10'
 
       - name: 3. 필수 패키지 설치
         run: |
@@ -33,5 +29,5 @@ jobs:
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add 통합_맞춤공고.xlsx 알림내역_기록장부.txt
-          git diff --quiet && git diff --staged --quiet || (git commit -m "🤖 [자동업데이트] 신규 맞춤공고 수집 완료" && git push)
+          git add 통합_맞춤공고.xlsx 알림내역_기록장부.txt verified_sites.json 저장된_공고모음.xlsx
+          git diff --quiet && git diff --staged --quiet || (git commit -m "🤖 [업데이트] 데이터 저장" && git push)
