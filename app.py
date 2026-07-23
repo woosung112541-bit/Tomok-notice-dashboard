@@ -3,7 +3,7 @@ import pandas as pd
 import json
 import os
 import subprocess
-from datetime import datetime
+import sys
 
 st.set_page_config(page_title="맞춤 공고 수집 대시보드", layout="wide")
 
@@ -24,11 +24,18 @@ st.sidebar.divider()
 if menu == "🚀 공고 자동 수집":
     st.title("🚀 공고 자동 수집 & 실시간 검색")
 
-    # 수집 실행 버튼
+    # 1. 수집 실행 버튼 (파이썬 가상환경 경로 명시 적용)
     if st.button("🚀 지금 즉시 공고 수집 실행", type="primary"):
         with st.spinner("공고를 수집 중입니다... 잠시만 기다려주세요."):
-            subprocess.run(["python", "main.py"], capture_output=True, text=True, encoding='utf-8')
-            st.success("수집이 완료되었습니다!")
+            try:
+                # sys.executable을 사용해 현재 실행 중인 정확한 파이썬 엔진으로 main.py 호출
+                result = subprocess.run([sys.executable, "main.py"], capture_output=True, text=True, encoding='utf-8')
+                if result.returncode == 0:
+                    st.success("수집이 완벽하게 완료되었습니다!")
+                else:
+                    st.error(f"수집 중 오류 발생: {result.stderr}")
+            except Exception as e:
+                st.error(f"실행 명령어 오류: {e}")
             st.rerun()
 
     st.divider()
@@ -57,7 +64,6 @@ if menu == "🚀 공고 자동 수집":
         # 3) 날짜 범위 검색
         if len(date_range) == 2 and '등록일' in filtered_df.columns:
             start_date, end_date = date_range[0], date_range[1]
-            # 등록일 컬럼 날짜 변환 (YYYY.MM.DD / YYYY-MM-DD 지원)
             parsed_dates = pd.to_datetime(filtered_df['등록일'].astype(str).str.replace('.', '-'), errors='coerce').dt.date
             filtered_df = filtered_df[(parsed_dates >= start_date) & (parsed_dates <= end_date)]
 
@@ -65,30 +71,17 @@ if menu == "🚀 공고 자동 수집":
 
         if not filtered_df.empty and '출처' in filtered_df.columns and filtered_df.iloc[0]['출처'] != '-':
 
-            # 표 좌측에 선택용 체크박스 열 생성
-            display_df = filtered_df.copy()
-            display_df.insert(0, "선택", False)
-
-            # 클릭 가능한 인터랙티브 데이터 에디터 표
-            edited_df = st.data_editor(
-                display_df,
-                column_config={
-                    "선택": st.column_config.CheckboxColumn("선택", default=False, help="보관할 공고를 체크하세요"),
-                    "상세링크": st.column_config.LinkColumn("상세링크")
-                },
-                disabled=[col for col in display_df.columns if col != "선택"],
-                hide_index=True,
-                use_container_width=True,
-                key="notice_editor"
+            # 보관함에 담을 공고 선택 (Multiselect 방식을 통해 안정성 극대화)
+            selected_indices = st.multiselect(
+                "📥 보관함에 저장할 공고를 아래에서 선택하세요:",
+                options=filtered_df.index,
+                format_func=lambda x: f"[{filtered_df.loc[x, '출처']}] {filtered_df.loc[x, '공고제목']} ({filtered_df.loc[x, '등록일']})"
             )
 
-            # 선택한 공고 보관 버튼
+            # 저장 버튼
             if st.button("📥 선택한 공고 보관", type="primary"):
-                selected_rows = edited_df[edited_df["선택"] == True]
-                
-                if not selected_rows.empty:
-                    # '선택' 체크박스 열 제외하고 저장
-                    save_df = selected_rows.drop(columns=["선택"])
+                if selected_indices:
+                    save_df = filtered_df.loc[selected_indices].copy()
 
                     # 1) 저장된_공고모음.xlsx 저장 (중복 제거)
                     saved_file = "저장된_공고모음.xlsx"
@@ -116,10 +109,17 @@ if menu == "🚀 공고 자동 수집":
                     with open(verified_file, "w", encoding="utf-8") as f:
                         json.dump(list(verified_sites), f, ensure_ascii=False, indent=4)
 
-                    st.success("선택한 공고가 성공적으로 공고 보관함에 저장되었습니다!")
+                    st.success("선택한 공고가 안전하게 공고 보관함에 저장되었습니다!")
                     st.rerun()
                 else:
-                    st.warning("보관할 공고의 좌측 체크박스를 먼저 선택해주세요.")
+                    st.warning("보관할 공고를 먼저 하나 이상 선택해 주세요.")
+
+            # 전체 목록 표 출력 (상세링크 클릭 가능)
+            st.dataframe(
+                filtered_df,
+                column_config={"상세링크": st.column_config.LinkColumn("상세링크")},
+                use_container_width=True
+            )
         else:
             st.dataframe(filtered_df, use_container_width=True)
     else:
@@ -129,7 +129,7 @@ if menu == "🚀 공고 자동 수집":
     check_file = "수동확인_필요목록.xlsx"
     if os.path.exists(check_file):
         st.divider()
-        st.subheader("⚠️ 추가검토(수동확인) 필요 사이트 목록")
+        st.subheader("⚠️ 추가검토 필요 사이트 목록")
         st.caption("※ 아직 검증 등록되지 않은 기관 중, 이번 수집에서 공고를 찾지 못한 곳들입니다.")
         check_df = pd.read_excel(check_file)
         st.dataframe(check_df, use_container_width=True)
@@ -151,7 +151,11 @@ elif menu == "📁 공고 보관함":
             saved_df = saved_df[saved_df['공고제목'].astype(str).str.contains(saved_kw, case=False, na=False)]
 
         st.write(f"총 **{len(saved_df)}개**의 공고가 보관함에 저장되어 있습니다.")
-        st.dataframe(saved_df, use_container_width=True)
+        st.dataframe(
+            saved_df,
+            column_config={"상세링크": st.column_config.LinkColumn("상세링크")},
+            use_container_width=True
+        )
     else:
         st.info("아직 저장된 공고가 없습니다. 첫 번째 메뉴에서 마음에 드는 공고를 담아보세요!")
 
@@ -174,4 +178,4 @@ elif menu == "⚙️ 검증 완료 기관 관리":
         except Exception:
             st.error("파일을 읽는 중 오류가 발생했습니다.")
     else:
-        st.info("아직 검증 등록된 기관이 없습니다. 공고 수집 결과에서 공고를 보관함에 담으면 자동으로 등록됩니다.")
+        st.info("아직 검증 등록된 기관이 없습니다. 공고를 보관함에 담으면 자동으로 등록됩니다.")
