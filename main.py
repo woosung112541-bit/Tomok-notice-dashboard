@@ -1,3 +1,19 @@
+import json
+import os
+
+# 검증 완료된 사이트 목록 불러오기 함수
+def load_verified_sites():
+    file_path = 'verified_sites.json'
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return set(json.load(f))
+        except Exception:
+            return set()
+    return set()
+
+
+
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
