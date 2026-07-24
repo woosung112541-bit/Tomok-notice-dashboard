@@ -13,7 +13,7 @@ st.set_page_config(page_title="맞춤 공고 수집 대시보드", layout="wide"
 st.sidebar.title("📌 메뉴 선택")
 menu = st.sidebar.radio(
     "이동할 메뉴를 선택하세요:",
-    ["🚀 공고 자동 수집", "📁 공고 보관함", "⚙️ 검증 완료 기관 관리"]
+    ["🚀 공고 자동 수집", "🏛️ 공고 수집 성공 기관", "⚠️ 추가검토 필요 기관 (미수집)"]
 )
 
 st.sidebar.divider()
@@ -24,14 +24,12 @@ st.sidebar.divider()
 if menu == "🚀 공고 자동 수집":
     st.title("🚀 공고 자동 수집 & 실시간 검색")
 
-    # 1. 수동 수집 버튼 (실시간 프로그레스 로그 표시 적용)
+    # 1. 수동 수집 버튼 (실시간 프로그레스 로그 표시)
     if st.button("🚀 지금 즉시 공고 수집 실행", type="primary"):
-        # 실시간 진행상황 창 생성
-        with st.status("🚀 공고를 수집 중입니다... (실시간 진행 로그)", expanded=True) as status:
+        with st.status("🚀 공고를 수집 중입니다...", expanded=True) as status:
             try:
-                # main.py의 print 출력을 실시간으로 한 줄씩 한 줄씩 읽어오는 Popen 프로세스 가동
                 process = subprocess.Popen(
-                    [sys.executable, "main.py"],
+                    [sys.executable, "-u", "main.py"],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
@@ -39,7 +37,6 @@ if menu == "🚀 공고 자동 수집":
                     bufsize=1
                 )
 
-                # 한 줄씩 읽어서 화면에 출력
                 for line in iter(process.stdout.readline, ''):
                     if line:
                         st.write(line.strip())
@@ -90,113 +87,46 @@ if menu == "🚀 공고 자동 수집":
 
         st.subheader(f"📋 수집된 맞춤 공고 목록 (검색 결과: {len(filtered_df)}건 / 전체: {len(df)}건)")
 
-        if not filtered_df.empty and '출처' in filtered_df.columns and filtered_df.iloc[0]['출처'] != '-':
-
-            # 보관함에 담을 공고 선택
-            selected_indices = st.multiselect(
-                "📥 보관함에 저장할 공고를 아래 목록에서 선택하세요:",
-                options=filtered_df.index,
-                format_func=lambda x: f"[{filtered_df.loc[x, '출처']}] {filtered_df.loc[x, '공고제목']} ({filtered_df.loc[x, '등록일']})"
-            )
-
-            # 저장 버튼
-            if st.button("📥 선택한 공고 보관", type="primary"):
-                if selected_indices:
-                    save_df = filtered_df.loc[selected_indices].copy()
-
-                    # 1) 저장된_공고모음.xlsx 저장 (중복 제거)
-                    saved_file = "저장된_공고모음.xlsx"
-                    if os.path.exists(saved_file):
-                        old_saved = pd.read_excel(saved_file)
-                        updated_saved = pd.concat([old_saved, save_df]).drop_duplicates(subset=['공고제목', '상세링크'])
-                    else:
-                        updated_saved = save_df
-
-                    updated_saved.to_excel(saved_file, index=False)
-
-                    # 2) 백그라운드 기관 검증 자동 등록 (verified_sites.json)
-                    verified_file = "verified_sites.json"
-                    verified_sites = set()
-                    if os.path.exists(verified_file):
-                        try:
-                            with open(verified_file, "r", encoding="utf-8") as f:
-                                verified_sites = set(json.load(f))
-                        except Exception:
-                            pass
-
-                    new_orgs = set(save_df['출처'].dropna().unique())
-                    verified_sites.update(new_orgs)
-
-                    with open(verified_file, "w", encoding="utf-8") as f:
-                        json.dump(list(verified_sites), f, ensure_ascii=False, indent=4)
-
-                    st.success("선택한 공고가 안전하게 공고 보관함에 저장되었습니다!")
-                    st.rerun()
-                else:
-                    st.warning("보관할 공고를 먼저 하나 이상 선택해 주세요.")
-
-            # 전체 목록 표 출력 (상세링크 클릭 가능)
-            st.dataframe(
-                filtered_df,
-                column_config={"상세링크": st.column_config.LinkColumn("상세링크")},
-                use_container_width=True
-            )
-        else:
-            st.dataframe(filtered_df, use_container_width=True)
-    else:
-        st.info("아직 수집된 결과가 없습니다. 상단의 버튼을 눌러 수집을 시작해 보세요!")
-
-    # 추가검토 필요 사이트 목록
-    check_file = "수동확인_필요목록.xlsx"
-    if os.path.exists(check_file):
-        st.divider()
-        st.subheader("⚠️ 추가검토 필요 사이트 목록")
-        st.caption("※ 아직 검증 등록되지 않은 기관 중, 이번 수집에서 공고를 찾지 못한 곳들입니다.")
-        check_df = pd.read_excel(check_file)
-        st.dataframe(check_df, use_container_width=True)
-
-# ==========================================
-# --- 2번 메뉴: 📁 공고 보관함 ---
-# ==========================================
-elif menu == "📁 공고 보관함":
-    st.title("📁 공고 보관함")
-
-    saved_file = "저장된_공고모음.xlsx"
-    if os.path.exists(saved_file):
-        saved_df = pd.read_excel(saved_file)
-
-        # 보관함 전용 검색
-        st.sidebar.subheader("🔍 보관함 내 검색")
-        saved_kw = st.sidebar.text_input("공고제목 / 키워드 검색", "")
-        if saved_kw:
-            saved_df = saved_df[saved_df['공고제목'].astype(str).str.contains(saved_kw, case=False, na=False)]
-
-        st.write(f"총 **{len(saved_df)}개**의 공고가 보관함에 저장되어 있습니다.")
+        # 전체 목록 표 출력 (상세링크 클릭 가능)
         st.dataframe(
-            saved_df,
+            filtered_df,
             column_config={"상세링크": st.column_config.LinkColumn("상세링크")},
             use_container_width=True
         )
     else:
-        st.info("아직 저장된 공고가 없습니다. 첫 번째 메뉴에서 마음에 드는 공고를 담아보세요!")
+        st.info("아직 수집된 결과가 없습니다. 상단의 버튼을 눌러 수집을 시작해 보세요!")
 
 # ==========================================
-# --- 3번 메뉴: ⚙️ 검증 완료 기관 관리 ---
+# --- 2번 메뉴: 🏛️ 공고 수집 성공 기관 ---
 # ==========================================
-elif menu == "⚙️ 검증 완료 기관 관리":
-    st.title("⚙️ 검증 완료된 기관 목록")
-    st.caption("이 목록에 등록된 기관은 공고가 나오지 않는 날에도 '추가검토 필요 사이트'에 나타나지 않습니다.")
+elif menu == "🏛️ 공고 수집 성공 기관":
+    st.title("🏛️ 공고 수집 성공 기관 목록")
+    st.caption("단 한 번이라도 공고를 발굴하는 데 성공했던 검증 완료 기관들입니다.")
 
-    verified_file = "verified_sites.json"
-    if os.path.exists(verified_file):
+    collected_file = "collected_orgs.json"
+    if os.path.exists(collected_file):
         try:
-            with open(verified_file, "r", encoding="utf-8") as f:
-                v_sites = json.load(f)
+            with open(collected_file, "r", encoding="utf-8") as f:
+                c_orgs = json.load(f)
 
-            st.write(f"현재 총 **{len(v_sites)}개** 기관이 검증 등록되어 있습니다:")
-            for s in v_sites:
-                st.write(f"- ✅ **{s}**")
+            st.write(f"현재 총 **{len(c_orgs)}개** 기관에서 공고를 성공적으로 발굴해 보았습니다:")
+            for org in c_orgs:
+                st.write(f"- ✅ **{org}**")
         except Exception:
             st.error("파일을 읽는 중 오류가 발생했습니다.")
     else:
-        st.info("아직 검증 등록된 기관이 없습니다. 공고를 보관함에 담으면 자동으로 등록됩니다.")
+        st.info("아직 공고 수집에 성공한 기관 기록이 없습니다. 수집을 실행하면 자동으로 등록됩니다.")
+
+# ==========================================
+# --- 3번 메뉴: ⚠️ 추가검토 필요 기관 (미수집) ---
+# ==========================================
+elif menu == "⚠️ 추가검토 필요 기관 (미수집)":
+    st.title("⚠️ 추가검토 필요 기관 목록")
+    st.caption("※ 여태껏 단 한 번도 공고가 수집된 적 없는 기관들만 모아둔 목록입니다.")
+
+    check_file = "수동확인_필요목록.xlsx"
+    if os.path.exists(check_file):
+        check_df = pd.read_excel(check_file)
+        st.dataframe(check_df, use_container_width=True)
+    else:
+        st.success("🎉 현재 모든 대상 기관이 최소 1회 이상 공고를 발굴했던 검증된 기관이거나, 미수집 기관이 없습니다!")
