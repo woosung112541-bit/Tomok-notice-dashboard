@@ -23,13 +23,23 @@ st.sidebar.divider()
 # ==========================================
 if menu == "🚀 공고 자동 수집":
     st.title("🚀 공고 자동 수집 & 실시간 검색")
+    
+    # 🌟 [신규 기능] 대시보드에서 수집 기간 및 키워드 직접 설정
+    st.info("💡 아래에서 수집을 원하는 기간과 키워드를 지정한 후 실행 버튼을 눌러주세요. (텔레그램 알림 없이 여기에 모두 모입니다!)")
+    
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        collect_days = st.number_input("📅 수집 기간 (최근 며칠간의 공고를 가져올까요?)", min_value=1, max_value=365, value=15, step=1)
+    with col2:
+        collect_keywords = st.text_input("🔑 수집 키워드 (쉼표로 구분하여 입력)", value="안전, 모집, 지정, 공고, 용역")
 
-    # 1. 수동 수집 버튼 (실시간 프로그레스 로그 표시)
+    # 1. 수집 버튼
     if st.button("🚀 지금 즉시 공고 수집 실행", type="primary"):
-        with st.status("🚀 공고를 수집 중입니다...", expanded=True) as status:
+        with st.status(f"🚀 최근 {collect_days}일간의 공고를 수집 중입니다...", expanded=True) as status:
             try:
+                # 사용자가 입력한 날짜와 키워드를 main.py로 전달
                 process = subprocess.Popen(
-                    [sys.executable, "-u", "main.py"],
+                    [sys.executable, "-u", "main.py", str(collect_days), collect_keywords],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
@@ -45,7 +55,7 @@ if menu == "🚀 공고 자동 수집":
 
                 if process.returncode == 0:
                     status.update(label="✅ 공고 수집 완료!", state="complete", expanded=False)
-                    st.success("수집이 성공적으로 마무리되었습니다!")
+                    st.success("수집이 성공적으로 마무리되었습니다. 아래 표를 확인하세요!")
                 else:
                     status.update(label="❌ 수집 실패 (오류 발생)", state="error", expanded=True)
                     st.error("수집 도중 오류가 발생했습니다.")
@@ -71,15 +81,11 @@ if menu == "🚀 공고 자동 수집":
         # 검색 필터링 로직
         filtered_df = df.copy()
         
-        # 1) 키워드 검색
         if search_keyword:
             filtered_df = filtered_df[filtered_df['공고제목'].astype(str).str.contains(search_keyword, case=False, na=False)]
-        
-        # 2) 기관 검색
         if search_org and '출처' in filtered_df.columns:
             filtered_df = filtered_df[filtered_df['출처'].astype(str).str.contains(search_org, case=False, na=False)]
         
-        # 3) 날짜 범위 검색
         if len(date_range) == 2 and '등록일' in filtered_df.columns:
             start_date, end_date = date_range[0], date_range[1]
             parsed_dates = pd.to_datetime(filtered_df['등록일'].astype(str).str.replace('.', '-'), errors='coerce').dt.date
