@@ -85,7 +85,8 @@ def discover_additional_boards(base_url, domain):
     headers = {'User-Agent': 'Mozilla/5.0'}
     discovered_urls = set()
     try:
-        response = requests.get(base_url, headers=headers, verify=False, timeout=10)
+        # ★ 강제 탈출 설정: 접속 5초 대기, 데이터 수신 10초 대기 후 안되면 컷!
+        response = requests.get(base_url, headers=headers, verify=False, timeout=(5, 10))
         response.encoding = 'utf-8'
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -102,12 +103,12 @@ def discover_additional_boards(base_url, domain):
         pass
     return list(discovered_urls)[:3] 
 
-# [1단계] 스마트 날짜 인식기 적용 함수
 def smart_scrape_board(url, domain, org_name):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     results = []
     try:
-        response = requests.get(url, headers=headers, verify=False, timeout=15)
+        # ★ 강제 탈출 설정: 접속 5초 대기, 데이터 수신 10초 대기 후 안되면 컷!
+        response = requests.get(url, headers=headers, verify=False, timeout=(5, 10))
         response.encoding = 'utf-8'
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -156,14 +157,12 @@ def smart_scrape_board(url, domain, org_name):
     return results
 
 # ==========================================
-# 🌟 [수동 추가 사이트 목록]
 EXTRA_SITES = [
     {'url': 'http://www.assi.or.kr/index.asp', 'org_name': '대한산업안전협회(수동추가)'},
     {'url': 'https://www.pps.go.kr/kor/bbs/list.do?key=00641', 'org_name': '조달청 공지사항(수동추가)'},
     {'url': 'https://www.igunsul.net/', 'org_name': '아이건설넷(수동추가)'},
     {'url': 'https://www.g2b.go.kr/', 'org_name': '나라장터(수동추가)'}
 ]
-# ==========================================
 
 print(f"[시스템] 데이터 수집 기준: 최근 {DAYS_AGO}일 이내 | 검출 키워드: {TARGET_KEYWORDS}")
 try:
@@ -191,9 +190,6 @@ except Exception as e:
     print(f"[오류] 데이터 로드 실패: {e}")
     all_sites = EXTRA_SITES
 
-# ==========================================
-# [2단계] 로봇 10마리 분신술 (멀티스레딩 워커 함수)
-# ==========================================
 def process_site(site):
     base_url = site['url']
     org_name = site['org_name']
@@ -225,10 +221,10 @@ all_notices = []
 empty_sites = [] 
 new_alert_count = 0
 
-print(f"[시작] 🚀 멀티스레딩 고속 엔진을 가동합니다. (로봇 10대 동시 투입)")
+# ★ 안전 운행 설정: 로봇 10마리 -> 5마리로 조절 (방화벽 차단 방지)
+print(f"[시작] 🚀 멀티스레딩 고속 엔진을 가동합니다. (로봇 5대 안전 모드 투입)")
 
-# 병렬 처리 시작 (10개씩 동시 처리)
-with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
     future_to_site = {executor.submit(process_site, site): site for site in all_sites}
     
     for i, future in enumerate(concurrent.futures.as_completed(future_to_site), 1):
@@ -237,7 +233,6 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             org_name = result['org_name']
             notices = result['notices']
             
-            # 탐색 완료 로그 즉시 출력
             print(f"[{i}/{len(all_sites)}] ✅ [완료] {org_name} (수집: {len(notices)}건)")
             
             if result['found']:
@@ -262,7 +257,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                             f"🔗 <a href='{item['상세링크']}'>상세내용 확인하기</a>"
                         )
                         send_telegram_message(msg_text)
-                        time.sleep(0.3) # 텔레그램 속도 제한 방어
+                        time.sleep(0.3) 
             else:
                 empty_sites.append({
                     '출처기관': org_name,
@@ -270,7 +265,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                     '분류': '신규 데이터 없음 또는 접근 불가'
                 })
         except Exception as e:
-            print(f"[{i}/{len(all_sites)}] ❌ [오류] 사이트 처리 중 문제 발생: {e}")
+            print(f"[{i}/{len(all_sites)}] ❌ [시간 초과/오류] 사이트가 응답하지 않아 건너뜁니다.")
 
 # ==========================================
 with open(COLLECTED_ORGS_FILE, 'w', encoding='utf-8') as f:
