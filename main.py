@@ -8,6 +8,9 @@ import urllib.parse
 import urllib3
 import time
 import sys
+import re
+
+
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -128,30 +131,40 @@ def smart_scrape_board(url, domain, org_name):
                     else:
                         link = urllib.parse.urljoin(url, href)
                         
+                    # ==========================================
+                    # 💡 [업그레이드] 스마트 날짜 인식 알고리즘 적용
+                    # ==========================================
                     date_str = ""
+                    post_date = None
+                    
                     for text in row.stripped_strings:
-                        text = text.replace("-", ".")
-                        if "." in text and len(text) == 10 and text.startswith("202"):
-                            date_str = text
-                            break
+                        # 정규표현식: 2026.07.20, 26-7-20, 2026년 07월 20일 등 모두 탐지
+                        match = re.search(r'(20\d{2}|\d{2})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})', text)
+                        if match:
+                            y, m, d = match.groups()
+                            # 연도가 2자리(예: 26)면 앞에 20을 붙여 4자리(2026)로 만듦
+                            if len(y) == 2: y = "20" + y 
                             
-                    if date_str:
-                        try:
-                            post_date = datetime.strptime(date_str, "%Y.%m.%d")
-                            if post_date >= target_date_limit:
-                                if any(keyword in title for keyword in TARGET_KEYWORDS):
-                                    results.append({
-                                        '출처': org_name,
-                                        '등록일': date_str,
-                                        '공고제목': title,
-                                        '상세링크': link
-                                    })
-                        except ValueError:
-                            pass
+                            try:
+                                post_date = datetime(int(y), int(m), int(d))
+                                date_str = post_date.strftime("%Y.%m.%d")
+                                break # 날짜를 하나 찾으면 더 이상 텍스트를 뒤지지 않음
+                            except ValueError:
+                                pass
+                            
+                    # 목표 날짜 이내의 공고이면서, 키워드가 포함되어 있다면 수집!
+                    if post_date and post_date >= target_date_limit:
+                        if any(keyword in title for keyword in TARGET_KEYWORDS):
+                            results.append({
+                                '출처': org_name,
+                                '등록일': date_str,
+                                '공고제목': title,
+                                '상세링크': link
+                            })
+                    # ==========================================
     except Exception:
         pass
     return results
-
 # ==========================================
 # ==========================================
 # 🌟 [수동 추가 사이트 목록] 
