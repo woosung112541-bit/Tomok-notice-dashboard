@@ -9,8 +9,7 @@ import urllib3
 import time
 import sys
 import re
-
-
+import concurrent.futures
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -27,8 +26,8 @@ def send_telegram_message(msg):
     payload = {'chat_id': TELEGRAM_CHAT_ID, 'text': msg, 'parse_mode': 'HTML'}
     try:
         requests.post(url, data=payload, timeout=5)
-    except Exception as e:
-        print(f"[알림 오류] 텔레그램 전송 실패: {e}")
+    except Exception:
+        pass
 
 # ==========================================
 # [환경 설정 및 파일 경로]
@@ -48,18 +47,16 @@ INPUT_EXCEL = os.path.join(BASE_DIR, '등록명부 정리시트.xlsx')
 OUTPUT_EXCEL = os.path.join(BASE_DIR, '통합_맞춤공고.xlsx')
 CHECK_EXCEL = os.path.join(BASE_DIR, '수동확인_필요목록.xlsx')
 HISTORY_FILE = os.path.join(BASE_DIR, '알림내역_기록장부.txt') 
-COLLECTED_ORGS_FILE = os.path.join(BASE_DIR, 'collected_orgs.json') # 공고 수집 성공 기관 장부
+COLLECTED_ORGS_FILE = os.path.join(BASE_DIR, 'collected_orgs.json')
 
 target_date_limit = datetime.now() - timedelta(days=DAYS_AGO)
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-# 1. 중복 알림 방지 장부 로드 (기관명 + 공고제목 조합으로 엄격 체킹)
 history_keys = set()
 if os.path.exists(HISTORY_FILE):
     with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
         history_keys = set(line.strip() for line in f if line.strip())
 
-# 2. 여태껏 공고 수집에 성공했던 기관 장부 로드
 collected_orgs = set()
 if os.path.exists(COLLECTED_ORGS_FILE):
     try:
@@ -95,7 +92,6 @@ def discover_additional_boards(base_url, domain):
             for a_tag in soup.find_all('a', href=True):
                 text = a_tag.get_text(strip=True)
                 href = a_tag['href']
-                
                 if any(keyword in text for keyword in BOARD_MENU_KEYWORDS):
                     if "javascript:" in href.lower() or href == "#":
                         continue
@@ -106,6 +102,7 @@ def discover_additional_boards(base_url, domain):
         pass
     return list(discovered_urls)[:3] 
 
+# [1단계] 스마트 날짜 인식기 적용 함수
 def smart_scrape_board(url, domain, org_name):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     results = []
@@ -131,28 +128,21 @@ def smart_scrape_board(url, domain, org_name):
                     else:
                         link = urllib.parse.urljoin(url, href)
                         
-                    # ==========================================
-                    # 💡 [업그레이드] 스마트 날짜 인식 알고리즘 적용
-                    # ==========================================
                     date_str = ""
                     post_date = None
                     
                     for text in row.stripped_strings:
-                        # 정규표현식: 2026.07.20, 26-7-20, 2026년 07월 20일 등 모두 탐지
                         match = re.search(r'(20\d{2}|\d{2})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})', text)
                         if match:
                             y, m, d = match.groups()
-                            # 연도가 2자리(예: 26)면 앞에 20을 붙여 4자리(2026)로 만듦
                             if len(y) == 2: y = "20" + y 
-                            
                             try:
                                 post_date = datetime(int(y), int(m), int(d))
                                 date_str = post_date.strftime("%Y.%m.%d")
-                                break # 날짜를 하나 찾으면 더 이상 텍스트를 뒤지지 않음
+                                break
                             except ValueError:
                                 pass
                             
-                    # 목표 날짜 이내의 공고이면서, 키워드가 포함되어 있다면 수집!
                     if post_date and post_date >= target_date_limit:
                         if any(keyword in title for keyword in TARGET_KEYWORDS):
                             results.append({
@@ -161,14 +151,12 @@ def smart_scrape_board(url, domain, org_name):
                                 '공고제목': title,
                                 '상세링크': link
                             })
-                    # ==========================================
     except Exception:
         pass
     return results
+
 # ==========================================
-# ==========================================
-# 🌟 [수동 추가 사이트 목록] 
-# 엑셀을 수정할 필요 없이 여기에 링크를 계속 추가하시면 됩니다.
+# 🌟 [수동 추가 사이트 목록]
 EXTRA_SITES = [
     {'url': 'http://www.assi.or.kr/index.asp', 'org_name': '대한산업안전협회(수동추가)'},
     {'url': 'https://www.pps.go.kr/kor/bbs/list.do?key=00641', 'org_name': '조달청 공지사항(수동추가)'},
@@ -181,8 +169,6 @@ print(f"[시스템] 데이터 수집 기준: 최근 {DAYS_AGO}일 이내 | 검�
 try:
     df_input = pd.read_excel(INPUT_EXCEL, sheet_name=0)
     target_sites = []
-    
-    # 1. 엑셀 파일에서 사이트 불러오기
     for index, row in df_input.iterrows():
         org_name = str(row.iloc[ORG_NAME_COL_INDEX]).strip()
         if org_name == 'nan' or not org_name:
@@ -196,7 +182,6 @@ try:
         if url_k.startswith('http'):
             target_sites.append({'url': url_k, 'org_name': org_name})
             
-    # 2. 위에 작성해둔 [수동 추가 사이트] 목록을 합치기
     target_sites.extend(EXTRA_SITES)
             
     unique_sites = {site['url']: site for site in target_sites}.values()
@@ -205,73 +190,92 @@ try:
 except Exception as e:
     print(f"[오류] 데이터 로드 실패: {e}")
     all_sites = EXTRA_SITES
-# ==========================================
-all_notices = []
-empty_sites = [] 
-new_alert_count = 0
 
-print("[시작] 공고 수집 및 알고리즘을 가동합니다.")
-for i, site in enumerate(all_sites, 1):
+# ==========================================
+# [2단계] 로봇 10마리 분신술 (멀티스레딩 워커 함수)
+# ==========================================
+def process_site(site):
     base_url = site['url']
     org_name = site['org_name']
     domain = get_domain(base_url)
     
-    print(f"\n[{i}/{len(all_sites)}] [탐색] {org_name} 접속 중...")
     urls_to_scrape = [base_url]
-    
     discovered = discover_additional_boards(base_url, domain)
     if discovered:
         urls_to_scrape.extend(discovered)
     
     site_found_notices = False
+    site_notices = []
     
-    for idx, url_to_scrape in enumerate(urls_to_scrape):
+    for url_to_scrape in urls_to_scrape:
         scraped_data = smart_scrape_board(url_to_scrape, domain, org_name)
         if scraped_data:
             site_found_notices = True
+            site_notices.extend(scraped_data)
             
-            # ★ 성공한 기관 자동 기록
-            collected_orgs.add(org_name)
-            
-            for item in scraped_data:
-                all_notices.append(item)
-                
-                # ★ 중복 알림 방지용 고유키 (기관명 + 제목)
-                notice_key = f"{item['출처']}|||{item['공고제목']}"
-                
-                if notice_key not in history_keys:
-                    history_keys.add(notice_key)
-                    new_alert_count += 1
-                    
-                    with open(HISTORY_FILE, 'a', encoding='utf-8') as f:
-                        f.write(notice_key + '\n')
-                    
-                    msg_text = (
-                        f"🚨 <b>[신규 공고 알림]</b>\n\n"
-                        f"🏢 <b>발주기관:</b> {item['출처']}\n"
-                        f"📌 <b>공고제목:</b> {item['공고제목']}\n"
-                        f"📅 <b>등록일자:</b> {item['등록일']}\n\n"
-                        f"🔗 <a href='{item['상세링크']}'>상세내용 확인하기</a>"
-                    )
-                    send_telegram_message(msg_text)
-                    time.sleep(0.3)
-                    
-            print(f"   - [수집] 조건 부합 데이터 {len(scraped_data)}건 수집 완료.")
-        time.sleep(0.5) 
-        
-    if not site_found_notices:
-        empty_sites.append({
-            '출처기관': org_name,
-            '게시판_URL': base_url,
-            '분류': '신규 데이터 없음 또는 접근 불가'
-        })
+    return {
+        'org_name': org_name,
+        'base_url': base_url,
+        'notices': site_notices,
+        'found': site_found_notices
+    }
 
 # ==========================================
-# 1. 수집 성공 기관 장부 저장
+all_notices = []
+empty_sites = [] 
+new_alert_count = 0
+
+print(f"[시작] 🚀 멀티스레딩 고속 엔진을 가동합니다. (로봇 10대 동시 투입)")
+
+# 병렬 처리 시작 (10개씩 동시 처리)
+with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+    future_to_site = {executor.submit(process_site, site): site for site in all_sites}
+    
+    for i, future in enumerate(concurrent.futures.as_completed(future_to_site), 1):
+        try:
+            result = future.result()
+            org_name = result['org_name']
+            notices = result['notices']
+            
+            # 탐색 완료 로그 즉시 출력
+            print(f"[{i}/{len(all_sites)}] ✅ [완료] {org_name} (수집: {len(notices)}건)")
+            
+            if result['found']:
+                collected_orgs.add(org_name)
+                
+                for item in notices:
+                    all_notices.append(item)
+                    notice_key = f"{item['출처']}|||{item['공고제목']}"
+                    
+                    if notice_key not in history_keys:
+                        history_keys.add(notice_key)
+                        new_alert_count += 1
+                        
+                        with open(HISTORY_FILE, 'a', encoding='utf-8') as f:
+                            f.write(notice_key + '\n')
+                        
+                        msg_text = (
+                            f"🚨 <b>[신규 공고 알림]</b>\n\n"
+                            f"🏢 <b>발주기관:</b> {item['출처']}\n"
+                            f"📌 <b>공고제목:</b> {item['공고제목']}\n"
+                            f"📅 <b>등록일자:</b> {item['등록일']}\n\n"
+                            f"🔗 <a href='{item['상세링크']}'>상세내용 확인하기</a>"
+                        )
+                        send_telegram_message(msg_text)
+                        time.sleep(0.3) # 텔레그램 속도 제한 방어
+            else:
+                empty_sites.append({
+                    '출처기관': org_name,
+                    '게시판_URL': result['base_url'],
+                    '분류': '신규 데이터 없음 또는 접근 불가'
+                })
+        except Exception as e:
+            print(f"[{i}/{len(all_sites)}] ❌ [오류] 사이트 처리 중 문제 발생: {e}")
+
+# ==========================================
 with open(COLLECTED_ORGS_FILE, 'w', encoding='utf-8') as f:
     json.dump(list(collected_orgs), f, ensure_ascii=False, indent=4)
 
-# 2. 결과 엑셀 생성
 if len(all_notices) > 0:
     df_output = pd.DataFrame(all_notices)
     df_output = df_output.drop_duplicates(subset=['출처', '공고제목'])
@@ -282,7 +286,6 @@ else:
     df_output.to_excel(OUTPUT_EXCEL, index=False)
     print(f"\n[종료] 수집 완료. 조건에 부합하는 신규 데이터가 없습니다.")
 
-# 3. 추가검토 필요 기관 필터링 (여태껏 단 한 번도 공고를 수집해본 적 없는 기관만 추출)
 if empty_sites:
     filtered_empty_sites = [
         site for site in empty_sites 
