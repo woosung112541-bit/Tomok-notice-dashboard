@@ -14,6 +14,12 @@ import concurrent.futures
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==========================================
+# 🔑 [조달청(나라장터) 오픈 API 마스터키 설정]
+# 발급받으신 디코딩 인증키가 성공적으로 탑재되었습니다!
+G2B_API_KEY = "9f7b495399ad64ec35b86f54a0a933fdf368b264bed9bcbf4e9b11556b6c9ff9"
+# ==========================================
+
+# ==========================================
 # 📱 [텔레그램 알림 설정]
 # ==========================================
 TELEGRAM_TOKEN = "8732310390:AAGT20ClcRU2pb6F4z2zPJ1ug0_5MMlSv_E"
@@ -85,7 +91,6 @@ def discover_additional_boards(base_url, domain):
     headers = {'User-Agent': 'Mozilla/5.0'}
     discovered_urls = set()
     try:
-        # ★ 강제 탈출 설정: 접속 5초 대기, 데이터 수신 10초 대기 후 안되면 컷!
         response = requests.get(base_url, headers=headers, verify=False, timeout=(5, 10))
         response.encoding = 'utf-8'
         if response.status_code == 200:
@@ -107,7 +112,6 @@ def smart_scrape_board(url, domain, org_name):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     results = []
     try:
-        # ★ 강제 탈출 설정: 접속 5초 대기, 데이터 수신 10초 대기 후 안되면 컷!
         response = requests.get(url, headers=headers, verify=False, timeout=(5, 10))
         response.encoding = 'utf-8'
         if response.status_code == 200:
@@ -157,11 +161,57 @@ def smart_scrape_board(url, domain, org_name):
     return results
 
 # ==========================================
+# 🌟 [나라장터 전용 VIP 수집기 (오픈 API 연동)]
+# ==========================================
+def fetch_g2b_api(api_key, days_ago, keywords):
+    if not api_key:
+        print("⚠️ [나라장터] API 키가 입력되지 않아 나라장터 탐색을 건너뜁니다.")
+        return []
+        
+    print("\n🏛️ [나라장터] 조달청 오픈 API(용역/공사) 백도어 접근 중...")
+    end_dt = datetime.now().strftime("%Y%m%d2359")
+    start_dt = (datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d0000")
+    
+    results = []
+    # 조달청 용역 공고 엔드포인트
+    url = "http://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblancListInfoServc"
+    params = {
+        "serviceKey": api_key,
+        "numOfRows": "100", # 최근 100개 공고 조회
+        "pageNo": "1",
+        "inqryDiv": "1",
+        "inqryBgnDt": start_dt,
+        "inqryEndDt": end_dt,
+        "type": "json"
+    }
+    
+    try:
+        res = requests.get(url, params=params, timeout=15)
+        if res.status_code == 200:
+            data = res.json()
+            items = data.get('response', {}).get('body', {}).get('items', [])
+            for item in items:
+                title = item.get('bidNtceNm', '')
+                url_link = item.get('bidNtceDtlUrl', '')
+                date_str = item.get('bidNtceDt', '')[:10].replace('-', '.')
+                org_name_g2b = item.get('dmdInsttNm', '조달청(미상)')
+                
+                if any(kw in title for kw in keywords):
+                    results.append({
+                        '출처': f"{org_name_g2b} (나라장터)",
+                        '등록일': date_str,
+                        '공고제목': title,
+                        '상세링크': url_link
+                    })
+    except Exception as e:
+        print(f"❌ [나라장터 API 오류] {e}")
+        
+    return results
+
+# ==========================================
 EXTRA_SITES = [
     {'url': 'http://www.assi.or.kr/index.asp', 'org_name': '대한산업안전협회(수동추가)'},
-    {'url': 'https://www.pps.go.kr/kor/bbs/list.do?key=00641', 'org_name': '조달청 공지사항(수동추가)'},
-    {'url': 'https://www.igunsul.net/', 'org_name': '아이건설넷(수동추가)'},
-    {'url': 'https://www.g2b.go.kr/', 'org_name': '나라장터(수동추가)'}
+    {'url': 'https://www.igunsul.net/', 'org_name': '아이건설넷(수동추가)'}
 ]
 
 print(f"[시스템] 데이터 수집 기준: 최근 {DAYS_AGO}일 이내 | 검출 키워드: {TARGET_KEYWORDS}")
@@ -221,7 +271,6 @@ all_notices = []
 empty_sites = [] 
 new_alert_count = 0
 
-# ★ 안전 운행 설정: 로봇 10마리 -> 5마리로 조절 (방화벽 차단 방지)
 print(f"[시작] 🚀 멀티스레딩 고속 엔진을 가동합니다. (로봇 5대 안전 모드 투입)")
 
 with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
@@ -268,6 +317,34 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             print(f"[{i}/{len(all_sites)}] ❌ [시간 초과/오류] 사이트가 응답하지 않아 건너뜁니다.")
 
 # ==========================================
+# 🚀 3단계 보스 몬스터: 나라장터 API 호출 병합 
+# ==========================================
+g2b_notices = fetch_g2b_api(G2B_API_KEY, DAYS_AGO, TARGET_KEYWORDS)
+if g2b_notices:
+    print(f"🎉 [성공] 조달청 나라장터에서 {len(g2b_notices)}건의 맞춤 공고를 성공적으로 빼왔습니다!")
+    for item in g2b_notices:
+        all_notices.append(item)
+        notice_key = f"{item['출처']}|||{item['공고제목']}"
+        
+        if notice_key not in history_keys:
+            history_keys.add(notice_key)
+            new_alert_count += 1
+            with open(HISTORY_FILE, 'a', encoding='utf-8') as f:
+                f.write(notice_key + '\n')
+            
+            msg_text = (
+                f"🚨 <b>[신규 공고 알림 - 🏛️나라장터]</b>\n\n"
+                f"🏢 <b>발주기관:</b> {item['출처']}\n"
+                f"📌 <b>공고제목:</b> {item['공고제목']}\n"
+                f"📅 <b>등록일자:</b> {item['등록일']}\n\n"
+                f"🔗 <a href='{item['상세링크']}'>상세내용 확인하기</a>"
+            )
+            send_telegram_message(msg_text)
+            time.sleep(0.3)
+else:
+    print("⚠️ [안내] 나라장터 조회 결과, 조건에 맞는 새로운 공고가 없거나 아직 업로드되지 않았습니다.")
+# ==========================================
+
 with open(COLLECTED_ORGS_FILE, 'w', encoding='utf-8') as f:
     json.dump(list(collected_orgs), f, ensure_ascii=False, indent=4)
 
