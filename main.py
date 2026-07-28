@@ -153,10 +153,23 @@ def smart_scrape_board(url, domain, org_name):
     return results
 
 # ==========================================
+# ==========================================
+# 🌟 [수동 추가 사이트 목록] 
+# 엑셀을 수정할 필요 없이 여기에 링크를 계속 추가하시면 됩니다.
+EXTRA_SITES = [
+    {'url': 'http://www.assi.or.kr/index.asp', 'org_name': '대한산업안전협회(수동추가)'},
+    {'url': 'https://www.pps.go.kr/kor/bbs/list.do?key=00641', 'org_name': '조달청 공지사항(수동추가)'},
+    {'url': 'https://www.igunsul.net/', 'org_name': '아이건설넷(수동추가)'},
+    {'url': 'https://www.g2b.go.kr/', 'org_name': '나라장터(수동추가)'}
+]
+# ==========================================
+
 print(f"[시스템] 데이터 수집 기준: 최근 {DAYS_AGO}일 이내 | 검출 키워드: {TARGET_KEYWORDS}")
 try:
     df_input = pd.read_excel(INPUT_EXCEL, sheet_name=0)
     target_sites = []
+    
+    # 1. 엑셀 파일에서 사이트 불러오기
     for index, row in df_input.iterrows():
         org_name = str(row.iloc[ORG_NAME_COL_INDEX]).strip()
         if org_name == 'nan' or not org_name:
@@ -170,13 +183,15 @@ try:
         if url_k.startswith('http'):
             target_sites.append({'url': url_k, 'org_name': org_name})
             
+    # 2. 위에 작성해둔 [수동 추가 사이트] 목록을 합치기
+    target_sites.extend(EXTRA_SITES)
+            
     unique_sites = {site['url']: site for site in target_sites}.values()
     all_sites = list(unique_sites)
     print(f"[진행] 총 {len(all_sites)}개의 유효 접속 주소가 확보되었습니다.\n")
 except Exception as e:
     print(f"[오류] 데이터 로드 실패: {e}")
-    all_sites = []
-
+    all_sites = EXTRA_SITES
 # ==========================================
 all_notices = []
 empty_sites = [] 
