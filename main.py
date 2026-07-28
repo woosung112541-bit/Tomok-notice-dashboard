@@ -177,7 +177,7 @@ def fetch_g2b_api(api_key, days_ago, keywords):
     url = "http://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblancListInfoServc"
     params = {
         "serviceKey": api_key,
-        "numOfRows": "100", # 최근 100개 공고 조회
+        "numOfRows": "999", # 최근 100개 공고 조회
         "pageNo": "1",
         "inqryDiv": "1",
         "inqryBgnDt": start_dt,
