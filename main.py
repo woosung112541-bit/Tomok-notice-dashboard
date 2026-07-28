@@ -11,6 +11,12 @@ import sys
 import re
 import concurrent.futures
 
+# 🌟 [신규 장착] 무적의 크롬 브라우저 조종석 (Selenium)
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==========================================
@@ -18,7 +24,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 G2B_API_KEY = "9f7b495399ad64ec35b86f54a0a933fdf368b264bed9bcbf4e9b11556b6c9ff9"
 # ==========================================
 
-# 대시보드(app.py)에서 넘겨받은 날짜와 키워드 설정
 if len(sys.argv) >= 3:
     DAYS_AGO = int(sys.argv[1])
     TARGET_KEYWORDS = [word.strip() for word in sys.argv[2].split(',')]
@@ -72,18 +77,20 @@ def discover_additional_boards(base_url, domain):
                 text = a_tag.get_text(strip=True)
                 href = a_tag['href']
                 if any(keyword in text for keyword in BOARD_MENU_KEYWORDS):
-                    if "javascript:" in href.lower() or href == "#":
-                        continue
+                    if "javascript:" in href.lower() or href == "#": continue
                     full_url = urllib.parse.urljoin(base_url, href)
-                    if domain in full_url: 
-                        discovered_urls.add(full_url)
-    except Exception:
-        pass
+                    if domain in full_url: discovered_urls.add(full_url)
+    except Exception: pass
     return list(discovered_urls)[:3] 
 
+# ---------------------------------------------------------
+# 🛠️ [기존] 초고속 스캐너 (requests) - 빠르지만 JS를 못 읽음
+# ---------------------------------------------------------
 def smart_scrape_board(url, domain, org_name):
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     results = []
+    rows_found_count = 0 # 💡 게시판 표를 찾았는지 확인하는 용도
+    
     try:
         response = requests.get(url, headers=headers, verify=False, timeout=(5, 10))
         response.encoding = 'utf-8'
@@ -95,15 +102,15 @@ def smart_scrape_board(url, domain, org_name):
                 if len(found_rows) > 0:
                     rows = found_rows
                     break
+                    
+            rows_found_count = len(rows) # 표 구조를 찾았다면 0보다 큼
+            
             for row in rows:
                 title_tag = row.find('a')
                 if title_tag:
                     title = title_tag.get_text(strip=True)
                     href = title_tag.get('href', '').strip()
-                    if "javascript:" in href.lower() or href == "#" or "void(" in href.lower() or not href:
-                        link = url 
-                    else:
-                        link = urllib.parse.urljoin(url, href)
+                    link = url if "javascript:" in href.lower() or href == "#" or not href else urllib.parse.urljoin(url, href)
                         
                     date_str, post_date = "", None
                     for text in row.stripped_strings:
@@ -120,10 +127,82 @@ def smart_scrape_board(url, domain, org_name):
                     if post_date and post_date >= target_date_limit:
                         if any(keyword in title for keyword in TARGET_KEYWORDS):
                             results.append({'출처': org_name, '등록일': date_str, '공고제목': title, '상세링크': link})
+    except Exception: pass
+    return results, rows_found_count
+
+# ---------------------------------------------------------
+# 🤖 [신규] 무적의 크롬 브라우저 (Selenium) - 느리지만 다 뚫음
+# ---------------------------------------------------------
+def get_chrome_driver():
+    chrome_options = Options()
+    chrome_options.add_argument("--headless") # 화면 없이 백그라운드 실행
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--window-size=1920x1080")
+    
+    try:
+        # 스트림릿 클라우드 리눅스 서버 우선 적용 (packages.txt 설치 파일 활용)
+        service = Service('/usr/bin/chromedriver')
+        driver = webdriver.Chrome(service=service, options=chrome_options)
     except Exception:
+        # 로컬(내 컴퓨터)이나 예외 상황 시 자동 설치
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        
+    return driver
+
+def smart_scrape_board_with_selenium(url, domain, org_name):
+    results = []
+    driver = None
+    try:
+        driver = get_chrome_driver()
+        driver.set_page_load_timeout(20)
+        driver.get(url)
+        time.sleep(3) # ★ 자바스크립트가 화면을 다 그릴 때까지 3초 대기 (이게 핵심)
+        
+        # 렌더링이 끝난 완벽한 HTML을 가져와서 기존 방식대로 분석
+        soup = BeautifulSoup(driver.page_source, 'html.parser')
+        rows = []
+        for selector in COMMON_ROW_SELECTORS:
+            found_rows = soup.select(selector)
+            if len(found_rows) > 0:
+                rows = found_rows
+                break
+                
+        for row in rows:
+            title_tag = row.find('a')
+            if title_tag:
+                title = title_tag.get_text(strip=True)
+                href = title_tag.get('href', '').strip()
+                link = url if "javascript:" in href.lower() or href == "#" or not href else urllib.parse.urljoin(url, href)
+                    
+                date_str, post_date = "", None
+                for text in row.stripped_strings:
+                    match = re.search(r'(20\d{2}|\d{2})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})', text)
+                    if match:
+                        y, m, d = match.groups()
+                        if len(y) == 2: y = "20" + y 
+                        try:
+                            post_date = datetime(int(y), int(m), int(d))
+                            date_str = post_date.strftime("%Y.%m.%d")
+                            break
+                        except ValueError: pass
+                        
+                if post_date and post_date >= target_date_limit:
+                    if any(keyword in title for keyword in TARGET_KEYWORDS):
+                        results.append({'출처': org_name, '등록일': date_str, '공고제목': title, '상세링크': link})
+    except Exception as e:
         pass
+    finally:
+        if driver:
+            driver.quit() # 메모리 관리를 위해 창 닫기 필수
+            
     return results
 
+# ---------------------------------------------------------
+# 조달청 API 호출 함수
+# ---------------------------------------------------------
 def fetch_g2b_api(api_key, days_ago, keywords):
     if not api_key: return []
     print("\n🏛️ [나라장터] 조달청 오픈 API 접근 중...")
@@ -175,14 +254,33 @@ def process_site(site):
     domain = get_domain(base_url)
     urls_to_scrape = [base_url] + discover_additional_boards(base_url, domain)
     site_notices = []
+    
+    # 처음부터 무조건 크롬으로 뚫어야 하는 사이트 (아이건설넷 등)
+    js_heavy_domains = ["igunsul.net"]
+    needs_selenium = any(d in domain for d in js_heavy_domains)
+
     for u in urls_to_scrape:
-        site_notices.extend(smart_scrape_board(u, domain, org_name))
+        if needs_selenium:
+            data = smart_scrape_board_with_selenium(u, domain, org_name)
+            site_notices.extend(data)
+        else:
+            # 💡 [하이브리드 로직] 1차: 초고속 스캐너로 훑어봄
+            data, rows_count = smart_scrape_board(u, domain, org_name)
+            
+            # 만약 게시판 표(Table) 자체가 0개라면? -> 방화벽이나 JS 렌더링에 당한 것!
+            if rows_count == 0:
+                # 2차: 크롬 브라우저를 꺼내들고 재도전!
+                data = smart_scrape_board_with_selenium(u, domain, org_name)
+                
+            site_notices.extend(data)
+            
     return {'org_name': org_name, 'base_url': base_url, 'notices': site_notices, 'found': len(site_notices) > 0}
 
 all_notices, empty_sites = [], []
 
-print(f"[시작] 🚀 대시보드 맞춤형 수집 엔진을 가동합니다. (로봇 5대 병렬 투입)")
-with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+# ★ 크롬 브라우저가 메모리를 많이 먹기 때문에 서버 터짐 방지를 위해 로봇 수를 3대로 조절
+print(f"[시작] 🚀 하이브리드 수집 엔진을 가동합니다. (안정성 최우선 3대 병렬 투입)")
+with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
     future_to_site = {executor.submit(process_site, site): site for site in all_sites}
     for i, future in enumerate(concurrent.futures.as_completed(future_to_site), 1):
         try:
