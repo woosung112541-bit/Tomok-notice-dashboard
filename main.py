@@ -42,11 +42,9 @@ INPUT_EXCEL = os.path.join(BASE_DIR, '등록명부 정리시트.xlsx')
 target_date_limit = datetime.now() - timedelta(days=DAYS_AGO)
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-# 🌟 [특이사항 추출 키워드 설정]
-SPECIAL_KWS = ["지역제한", "안전진단", "종합", "건설", "토목", "교량", "제한경쟁", "면허", "자격", "정밀안전진단", "안전진단", "성능평가", "안전점검", "수행기관", "토목", "대전"]
+# 🌟 [특이사항 추출 키워드 설정] - 안전진단 맞춤형 적용!
+SPECIAL_KWS = ["지역제한", "안전진단", "종합", "건설", "토목", "교량", "제한경쟁", "면허", "자격"]
 
-# ==========================================
-# 🌟 [구글 시트 연동 및 초기 셋업]
 # ==========================================
 try:
     gc = gspread.service_account(filename="google_key.json")
@@ -62,10 +60,8 @@ try:
         
     existing_notices = ws_notices.get_all_records()
     history_keys = {str(row.get('notice_key', '')) for row in existing_notices}
-    
     existing_collected = ws_collected.get_all_records()
     collected_orgs = {str(row.get('org_name', '')) for row in existing_collected if str(row.get('org_name', ''))}
-    
 except Exception as e:
     print(f"❌ 구글 시트 연결 실패: {e}")
     sys.exit(1)
@@ -96,7 +92,6 @@ def discover_additional_boards(base_url, domain):
     except: pass
     return list(discovered_urls)[:3] 
 
-# 🌟 [신규] 딥 스캐너: 상세페이지 & 첨부파일 분석 함수
 def deep_scan_notice(url):
     found_specials = set()
     try:
@@ -132,13 +127,10 @@ def deep_scan_notice(url):
     except: pass
     return "🔥 " + ", ".join(list(found_specials)) if found_specials else "-"
 
-# ---------------------------------------------------------
-# 🛠️ 1차: 초고속 스캐너 (requests)
-# ---------------------------------------------------------
 def smart_scrape_board(url, domain, org_name):
     headers = {'User-Agent': 'Mozilla/5.0'}
     results = []
-    rows_found_count = 0 
+    rows_found_count = 0
     try:
         response = requests.get(url, headers=headers, verify=False, timeout=(5, 10))
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -147,8 +139,8 @@ def smart_scrape_board(url, domain, org_name):
             found_rows = soup.select(selector)
             if len(found_rows) > 0:
                 rows = found_rows; break
-        rows_found_count = len(rows) 
         
+        rows_found_count = len(rows)
         for row in rows:
             title_tag = row.find('a')
             if title_tag:
@@ -175,9 +167,6 @@ def smart_scrape_board(url, domain, org_name):
     except: pass
     return results, rows_found_count
 
-# ---------------------------------------------------------
-# 🤖 2차: 무적의 크롬 브라우저 (Selenium)
-# ---------------------------------------------------------
 def get_chrome_driver():
     chrome_options = Options()
     chrome_options.add_argument("--headless") 
@@ -239,7 +228,6 @@ def smart_scrape_board_with_selenium(url, domain, org_name):
 
 def fetch_g2b_api(api_key, days_ago, keywords):
     if not api_key: return []
-    print("\n🏛️ [나라장터] 조달청 오픈 API 접근 중...")
     end_dt = datetime.now().strftime("%Y%m%d2359")
     start_dt = (datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d0000")
     results = []
@@ -268,7 +256,6 @@ def fetch_g2b_api(api_key, days_ago, keywords):
     except: pass
     return results
 
-# ==========================================
 EXTRA_SITES = [{'url': 'http://www.assi.or.kr/index.asp', 'org_name': '대한산업안전협회(수동)'}]
 
 try:
@@ -286,9 +273,26 @@ try:
 except:
     all_sites = EXTRA_SITES
 
+# 🌟 [신규] 건강 진단 탑재!
 def process_site(site):
     base_url, org_name = site['url'], site['org_name']
     domain = get_domain(base_url)
+    
+    health_status = "공고 없음"
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        res = requests.get(base_url, headers=headers, verify=False, timeout=7)
+        if res.status_code == 404: 
+            health_status = "❌ 404 에러 (게시판 삭제 또는 개편 의심)"
+        elif res.status_code != 200: 
+            health_status = f"⚠️ 서버 에러 (상태코드: {res.status_code})"
+    except requests.exceptions.Timeout:
+        health_status = "⏳ 응답 지연 (서버 마비 의심)"
+    except requests.exceptions.ConnectionError:
+        health_status = "🔌 연결 실패 (주소 완전 변경 의심)"
+    except Exception:
+        health_status = "⚠️ 기타 접속 오류"
+
     urls_to_scrape = [base_url] + discover_additional_boards(base_url, domain)
     site_notices = []
     
@@ -305,12 +309,17 @@ def process_site(site):
                 data = smart_scrape_board_with_selenium(u, domain, org_name)
             site_notices.extend(data)
             
-    return {'org_name': org_name, 'base_url': base_url, 'notices': site_notices, 'found': len(site_notices) > 0}
+    return {
+        'org_name': org_name, 
+        'base_url': base_url, 
+        'notices': site_notices, 
+        'found': len(site_notices) > 0,
+        'status': health_status
+    }
 
 all_notices, empty_sites = [], []
 
-# 크롬 안정성을 위해 3마리 유지
-print(f"[시작] 🚀 튜닝 모드 (딥스캔+구글시트 통합본) 가동 (로봇 3대 병렬 투입)")
+print(f"[시작] 🚀 튜닝 모드 (셀레니움+딥스캔+건강진단) 가동 (로봇 3대 병렬 투입)")
 with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
     future_to_site = {executor.submit(process_site, site): site for site in all_sites}
     for i, future in enumerate(concurrent.futures.as_completed(future_to_site), 1):
@@ -321,16 +330,13 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
                 collected_orgs.add(res['org_name'])
                 all_notices.extend(res['notices'])
             else:
-                empty_sites.append({'출처기관': res['org_name'], '게시판_URL': res['base_url'], '분류': '공고 없음'})
+                empty_sites.append({'출처기관': res['org_name'], '게시판_URL': res['base_url'], '분류': res['status']})
         except: pass
 
 g2b_notices = fetch_g2b_api(G2B_API_KEY, DAYS_AGO, TARGET_KEYWORDS)
 if g2b_notices: all_notices.extend(g2b_notices)
 
-# ==========================================
-# 🌟 [구글 시트에 최종 데이터 기록]
-# ==========================================
-print("\n📝 [저장 중] 튜닝 로봇이 수집한 데이터를 구글 시트에 기록합니다...")
+print("\n📝 [저장 중] 구글 시트에 기록합니다...")
 
 new_rows = []
 for item in all_notices:
@@ -344,7 +350,7 @@ for item in all_notices:
 
 if new_rows:
     ws_notices.append_rows(new_rows)
-    print(f"-> 🟢 구글 시트에 특이사항이 포함된 신규 공고 {len(new_rows)}건 추가 완료!")
+    print(f"-> 🟢 구글 시트에 신규 공고 {len(new_rows)}건 추가 완료!")
 
 new_orgs = [[org] for org in collected_orgs if org not in {str(row.get('org_name', '')) for row in existing_collected}]
 if new_orgs: ws_collected.append_rows(new_orgs)
@@ -354,4 +360,4 @@ ws_empty.append_row(['출처기관', '게시판_URL', '분류'])
 empty_rows = [[e['출처기관'], e['게시판_URL'], e['분류']] for e in empty_sites if e['출처기관'] not in collected_orgs]
 if empty_rows: ws_empty.append_rows(empty_rows)
 
-print(f"\n[종료] 튜닝 모드 수집 및 구글 시트 저장 완료! 📱")
+print(f"\n[종료] 튜닝 모드 수집 완료! 📱")
