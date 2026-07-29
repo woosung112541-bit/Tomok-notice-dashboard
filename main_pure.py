@@ -9,7 +9,7 @@ import time
 import sys
 import re
 import concurrent.futures
-import sqlite3  # 🌟 [신규 장착] 데이터베이스 라이브러리 (파이썬 기본 내장)
+import gspread  # 🌟 구글 시트 라이브러리
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -29,43 +29,41 @@ ORG_NAME_COL_INDEX = 2
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INPUT_EXCEL = os.path.join(BASE_DIR, '등록명부 정리시트.xlsx')
-DB_PATH = os.path.join(BASE_DIR, 'notices.db') # 🌟 DB 파일 경로
 
 target_date_limit = datetime.now() - timedelta(days=DAYS_AGO)
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 # ==========================================
-# 🌟 [DB 초기화 및 테이블 생성 함수]
+# 🌟 [구글 시트 연동 및 초기 셋업]
 # ==========================================
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    # 1. 공고 저장 테이블 (notice_key를 고유값으로 지정하여 완벽한 중복 방지)
-    c.execute('''CREATE TABLE IF NOT EXISTS notices 
-                 (org_name TEXT, post_date TEXT, title TEXT, link TEXT, notice_key TEXT UNIQUE, created_at TEXT)''')
-    # 2. 수집 성공 기관 테이블
-    c.execute('''CREATE TABLE IF NOT EXISTS collected_orgs (org_name TEXT UNIQUE)''')
-    # 3. 미수집(확인 필요) 기관 테이블
-    c.execute('''CREATE TABLE IF NOT EXISTS empty_orgs (org_name TEXT UNIQUE, url TEXT, status TEXT)''')
-    conn.commit()
-    return conn
-
-# DB 연결 및 수집 성공 기관 로드
-db_conn = init_db()
-collected_orgs = set()
-cursor = db_conn.cursor()
-cursor.execute("SELECT org_name FROM collected_orgs")
-for row in cursor.fetchall():
-    collected_orgs.add(row[0])
+try:
+    gc = gspread.service_account(filename="google_key.json")
+    doc = gc.open("맞춤공고_DB")
+    ws_notices = doc.worksheet("notices")
+    ws_collected = doc.worksheet("collected_orgs")
+    ws_empty = doc.worksheet("empty_orgs")
+    
+    # 1. 시트 헤더(첫 줄)가 비어있으면 생성
+    if not ws_notices.get_all_values():
+        ws_notices.append_row(["출처", "등록일", "공고제목", "상세링크", "notice_key", "created_at"])
+    if not ws_collected.get_all_values():
+        ws_collected.append_row(["org_name"])
+        
+    # 2. 기존 데이터 가져와서 중복 방지 세팅
+    existing_notices = ws_notices.get_all_records()
+    history_keys = {str(row.get('notice_key', '')) for row in existing_notices}
+    
+    existing_collected = ws_collected.get_all_records()
+    collected_orgs = {str(row.get('org_name', '')) for row in existing_collected if str(row.get('org_name', ''))}
+    
+except Exception as e:
+    print(f"❌ [치명적 오류] 구글 시트 연결 실패: {e}")
+    sys.exit(1)
 
 COMMON_ROW_SELECTORS = [
-    "table.board_list tbody tr", 
-    "table.board-list tbody tr",
-    "div.board_list tbody tr",
-    ".list_tbl tbody tr",
-    "tbody > tr",
-    "ul.board_list > li",
-    "div.list > ul > li"
+    "table.board_list tbody tr", "table.board-list tbody tr",
+    "div.board_list tbody tr", ".list_tbl tbody tr", "tbody > tr",
+    "ul.board_list > li", "div.list > ul > li"
 ]
 
 def get_domain(url):
@@ -131,7 +129,7 @@ def smart_scrape_board(url, domain, org_name):
 
 def fetch_g2b_api(api_key, days_ago, keywords):
     if not api_key: return []
-    print("\n🏛️ [나라장터] 조달청 오픈 API(용역/공사) 백도어 접근 중...")
+    print("\n🏛️ [나라장터] 조달청 오픈 API 접근 중...")
     end_dt = datetime.now().strftime("%Y%m%d2359")
     start_dt = (datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d0000")
     results = []
@@ -154,9 +152,7 @@ def fetch_g2b_api(api_key, days_ago, keywords):
     return results
 
 # ==========================================
-EXTRA_SITES = [
-    {'url': 'http://www.assi.or.kr/index.asp', 'org_name': '대한산업안전협회(수동추가)'}
-]
+EXTRA_SITES = [{'url': 'http://www.assi.or.kr/index.asp', 'org_name': '대한산업안전협회(수동추가)'}]
 
 print(f"[시스템] 수집 기간: 최근 {DAYS_AGO}일 이내 | 수집 키워드: {TARGET_KEYWORDS}")
 try:
@@ -185,7 +181,7 @@ def process_site(site):
 
 all_notices, empty_sites = [], []
 
-print(f"[시작] 🚀 초고속 순정 엔진 (DB 버전)을 가동합니다. (로봇 5대 병렬 투입)")
+print(f"[시작] 🚀 구글 시트 연동 초고속 엔진 가동 (로봇 5대 병렬 투입)")
 with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
     future_to_site = {executor.submit(process_site, site): site for site in all_sites}
     for i, future in enumerate(concurrent.futures.as_completed(future_to_site), 1):
@@ -206,32 +202,37 @@ if g2b_notices:
     all_notices.extend(g2b_notices)
 
 # ==========================================
-# 🌟 [DB에 데이터 저장 (INSERT)]
+# 🌟 [구글 시트에 최종 데이터 기록 (초고속 일괄 추가)]
 # ==========================================
-new_count = 0
+print("\n📝 [저장 중] 수집된 데이터를 구글 시트에 기록합니다...")
+
+# 1. 새 공고 기록 (중복 제외)
+new_rows = []
 for item in all_notices:
     notice_key = f"{item['출처']}|||{item['공고제목']}"
-    try:
-        # INSERT OR IGNORE: 중복된 notice_key가 들어오면 무시함 (완벽한 중복 방지)
-        cursor.execute('''INSERT OR IGNORE INTO notices (org_name, post_date, title, link, notice_key, created_at)
-                          VALUES (?, ?, ?, ?, ?, ?)''', 
-                       (item['출처'], item['등록일'], item['공고제목'], item['상세링크'], notice_key, current_time))
-        if cursor.rowcount > 0:
-            new_count += 1
-    except Exception as e:
-        pass
+    if notice_key not in history_keys:
+        new_rows.append([item['출처'], item['등록일'], item['공고제목'], item['상세링크'], notice_key, current_time])
+        history_keys.add(notice_key)
 
-for org in collected_orgs:
-    cursor.execute('''INSERT OR IGNORE INTO collected_orgs (org_name) VALUES (?)''', (org,))
+if new_rows:
+    ws_notices.append_rows(new_rows)
+    print(f"-> 🟢 구글 시트(notices)에 신규 공고 {len(new_rows)}건 추가 완료!")
+else:
+    print("-> ⚪ 새로운 공고가 없습니다.")
 
-# 테이블 비우고 최신 미수집 기관 업데이트
-cursor.execute('DELETE FROM empty_orgs')
+# 2. 새로운 성공 기관 업데이트
+new_orgs = [[org] for org in collected_orgs if org not in {str(row.get('org_name', '')) for row in existing_collected}]
+if new_orgs:
+    ws_collected.append_rows(new_orgs)
+
+# 3. 미수집 기관 시트 갱신 (기존 내용 지우고 새로 쓰기)
+ws_empty.clear()
+ws_empty.append_row(['출처기관', '게시판_URL', '분류'])
+empty_rows = []
 for empty in empty_sites:
     if empty['출처기관'] not in collected_orgs:
-        cursor.execute('''INSERT OR IGNORE INTO empty_orgs (org_name, url, status) VALUES (?, ?, ?)''',
-                       (empty['출처기관'], empty['게시판_URL'], empty['분류']))
+        empty_rows.append([empty['출처기관'], empty['게시판_URL'], empty['분류']])
+if empty_rows:
+    ws_empty.append_rows(empty_rows)
 
-db_conn.commit()
-db_conn.close()
-
-print(f"\n[종료] 총 {len(all_notices)}건 탐색 중, DB에 신규 공고 {new_count}건 저장 완료! 대시보드에서 확인하세요!")
+print(f"\n[종료] 모든 작업이 완료되었습니다! 스마트폰 구글 시트 앱에서도 결과를 확인해 보세요! 📱")
