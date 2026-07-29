@@ -5,3 +5,7 @@ beautifulsoup4
 openpyxl
 
 gspread
+
+gspread
+selenium
+webdriver-manager
