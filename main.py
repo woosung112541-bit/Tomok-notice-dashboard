@@ -344,7 +344,7 @@ def process_site(site):
 
 all_notices, empty_sites = [], []
 
-print(f"[시작] 🚀 튜닝 모드 (셀레니움+스마트 딥스캔+건강진단) 가동 (로봇 3대 병렬 투입)")
+print("[시작] 정밀탐색(딥스캔+셀레니움) 가동")
 with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
     future_to_site = {executor.submit(process_site, site): site for site in all_sites}
     for i, future in enumerate(concurrent.futures.as_completed(future_to_site), 1):
@@ -385,4 +385,4 @@ ws_empty.append_row(['출처기관', '게시판_URL', '분류'])
 empty_rows = [[e['출처기관'], e['게시판_URL'], e['분류']] for e in empty_sites if e['출처기관'] not in collected_orgs]
 if empty_rows: ws_empty.append_rows(empty_rows)
 
-print(f"\n[종료] 튜닝 모드 수집 완료! 📱")
+print("\n[종료] 정밀 탐색 수집 완료!")
