@@ -133,14 +133,13 @@ if menu == "공고 자동수집":
         st.info("아직 구글 시트에 수집된 데이터가 없거나, 시트가 비어있습니다.")
 
 # ==========================================
-# 2. 공고 통계 및 분석 메뉴 (기존 기능 100% 복구 + 2x2 완벽 배치)
+# 2. 공고 통계 및 분석 메뉴
 # ==========================================
 elif menu == "공고 통계 및 분석":
     st.title("📊 공고 통계 및 분석 대시보드")
     df = get_google_sheet("notices")
     
     if not df.empty and '공고제목' in df.columns:
-        # 상단 요약 수치 (기존 유지)
         col1, col2, col3 = st.columns(3)
         col1.metric("총 누적 수집 공고", f"{len(df)} 건")
         col2.metric("공고 발주 기관 수", f"{df['출처'].nunique()} 곳")
@@ -153,13 +152,11 @@ elif menu == "공고 통계 및 분석":
 
         st.divider()
         
-        # [상단 1열] 좌측: 지역별 통계 / 우측: 주요 특이사항 빈도 (복구)
+        # [상단 1열] 좌측: 지역별 통계 / 우측: 주요 특이사항 빈도
         top_col1, top_col2 = st.columns(2)
         
         with top_col1:
             st.subheader("🗺️ 지역별 공고 현황 (17개 시도 기준)")
-            
-            # 💡 수정 포인트: 데이터가 없어도 차트가 무조건 뜨게 만듦
             region_keywords = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주']
             region_counts = {k: 0 for k in region_keywords}
             
@@ -172,9 +169,7 @@ elif menu == "공고 통계 및 분석":
             
             region_series = pd.Series(region_counts)
             if region_series.sum() > 0:
-                region_series = region_series[region_series > 0] # 값이 0인 지역은 숨겨서 예쁘게 표시
-            
-            # 차트 무조건 렌더링
+                region_series = region_series[region_series > 0]
             st.bar_chart(region_series)
             
         with top_col2:
@@ -194,16 +189,30 @@ elif menu == "공고 통계 및 분석":
 
         st.divider()
         
-        # [하단 2열] 좌측: 날짜별 추이 (복구) / 우측: 최다 발주처 TOP 10 (이동 완료)
+        # ========================================================
+        # 🔥 수정한 포인트: X축, Y축 늘어짐 방지 & area_chart 적용
+        # ========================================================
         bottom_col1, bottom_col2 = st.columns(2)
         
         with bottom_col1:
-            st.subheader("📈 최근 일별 공고 발주 추이")
+            st.subheader("📈 전체 공고 발주 추이 (연도/일별 통합)")
             if '등록일' in df.columns and not parsed_dates.empty:
-                df['날짜포맷'] = parsed_dates
-                date_counts = df['날짜포맷'].value_counts().sort_index()
-                recent_date_counts = date_counts.tail(30)
-                st.line_chart(recent_date_counts)
+                # 1. 미래 날짜, 과거 날짜(수집기 오류) 제거 -> X축 무한 팽창 방지
+                today = pd.Timestamp.now()
+                valid_dates = parsed_dates[(parsed_dates.dt.year >= 2022) & (parsed_dates <= today + pd.Timedelta(days=1))]
+                
+                if not valid_dates.empty:
+                    # 2. 최근 30일 제한 해제 -> 전체 누적 데이터 사용
+                    date_counts = valid_dates.value_counts().sort_index()
+                    
+                    # 3. 공고가 0건인 날짜를 0으로 채워줌 -> 줌아웃 시 그래프 이빨 빠짐 방지
+                    full_range = pd.date_range(start=date_counts.index.min(), end=today)
+                    date_counts = date_counts.reindex(full_range, fill_value=0)
+                    
+                    # 4. Y축을 0부터 예쁘게 잡아주는 area_chart로 변경 (선그래프 대신 시각적으로 뛰어남)
+                    st.area_chart(date_counts)
+                else:
+                    st.info("유효한 날짜 데이터가 없습니다.")
             else:
                 st.info("날짜 데이터가 없습니다.")
                 
