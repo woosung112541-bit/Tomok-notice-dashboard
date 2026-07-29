@@ -5,7 +5,48 @@ import subprocess
 import sys
 import gspread
 
+# 화면 기본 설정이 무조건 가장 먼저 와야 합니다!
 st.set_page_config(page_title="맞춤 공고 수집 대시보드", layout="wide")
+
+# ==========================================
+# 🔐 [신규] 대시보드 철통 보안 자물쇠 설정
+# ==========================================
+DASHBOARD_PASSWORD = "0804"  # 👈 여기에 설정하신 비밀번호가 들어갑니다.
+
+def check_password():
+    """비밀번호 검증 로직"""
+    # 세션 상태에 'password_correct' 기록이 없으면 False로 초기화
+    if "password_correct" not in st.session_state:
+        st.session_state["password_correct"] = False
+
+    # 비밀번호가 아직 틀렸거나 입력 전이라면 로그인 창 표시
+    if not st.session_state["password_correct"]:
+        # 중앙 정렬을 위해 빈 컬럼 사용
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.title("🔒 대시보드 보안 접속")
+            st.info("이 대시보드는 우리 팀원만 접근할 수 있습니다.\n\n발급받은 비밀번호를 입력해 주세요.")
+            
+            pwd_input = st.text_input("🔑 비밀번호 입력", type="password")
+            
+            if st.button("🚀 접속하기", use_container_width=True, type="primary"):
+                if pwd_input == DASHBOARD_PASSWORD:
+                    st.session_state["password_correct"] = True
+                    st.rerun()  # 로그인 성공 시 화면 새로고침하여 본 화면으로 진입
+                else:
+                    st.error("🚫 비밀번호가 일치하지 않습니다.")
+        return False
+    
+    # 비밀번호가 맞으면 True 반환
+    return True
+
+# 🚨 비밀번호를 통과하지 못하면 밑에 있는 코드는 절대 실행되지 않음! (접속 차단)
+if not check_password():
+    st.stop()
+
+# ==========================================
+# 🌟 여기서부터는 로그인 성공 시 보여지는 '진짜 대시보드' 화면입니다.
+# ==========================================
 
 if "GOOGLE_CREDENTIALS" in st.secrets:
     with open("google_key.json", "w", encoding="utf-8") as f:
@@ -29,7 +70,7 @@ menu = st.sidebar.radio(
         "🚀 공고 자동 수집 (구글시트)", 
         "📊 공고 통계 및 분석 (참고용)",
         "🏛️ 공고 수집 성공 기관", 
-        "🚨 사이트 건강 진단 (오류/개편)" # 🌟 이름 변경!
+        "🚨 사이트 건강 진단 (오류/개편)"
     ]
 )
 st.sidebar.divider()
@@ -86,6 +127,8 @@ if menu == "🚀 공고 자동 수집 (구글시트)":
         display_columns = ['출처', '등록일', '공고제목', '특이사항', '상세링크']
         display_df = filtered_df[[c for c in display_columns if c in filtered_df.columns]]
         st.dataframe(display_df, column_config={"상세링크": st.column_config.LinkColumn("상세링크")}, use_container_width=True)
+    else:
+        st.info("아직 구글 시트에 수집된 데이터가 없거나, 시트가 비어있습니다.")
 
 # ==========================================
 # 2. 📊 공고 통계 메뉴
@@ -116,6 +159,13 @@ elif menu == "📊 공고 통계 및 분석 (참고용)":
                     specials_list = special_df['특이사항'].astype(str).str.replace('🔥', '').str.split(',')
                     all_specials = [item.strip() for sublist in specials_list if isinstance(sublist, list) for item in sublist if item.strip() and item.strip().lower() not in ignore_words]
                     if all_specials: st.bar_chart(pd.Series(all_specials).value_counts().head(10))
+        
+        st.subheader("📈 최근 일별 공고 발주 추이")
+        if '등록일' in df.columns and not parsed_dates.empty:
+            df['날짜포맷'] = parsed_dates
+            date_counts = df['날짜포맷'].value_counts().sort_index()
+            recent_date_counts = date_counts.tail(30)
+            st.line_chart(recent_date_counts)
 
 # ==========================================
 # 3. 🏛️ 성공 기관 메뉴
@@ -128,7 +178,7 @@ elif menu == "🏛️ 공고 수집 성공 기관":
             if str(org).strip(): st.write(f"- ✅ **{org}**")
 
 # ==========================================
-# 🌟 4. 🚨 사이트 건강 진단 (Health Check) 메뉴
+# 4. 🚨 사이트 건강 진단 (Health Check) 메뉴
 # ==========================================
 elif menu == "🚨 사이트 건강 진단 (오류/개편)":
     st.title("🚨 사이트 건강 진단 (Health Check)")
@@ -136,7 +186,6 @@ elif menu == "🚨 사이트 건강 진단 (오류/개편)":
     
     df_empty = get_google_sheet("empty_orgs")
     if not df_empty.empty and '분류' in df_empty.columns:
-        # '공고 없음'이 아닌 애들 = 진짜 문제가 생긴 기관들
         error_df = df_empty[df_empty['분류'] != '공고 없음']
         empty_df = df_empty[df_empty['분류'] == '공고 없음']
         
@@ -147,7 +196,6 @@ elif menu == "🚨 사이트 건강 진단 (오류/개편)":
             st.success("✅ 현재 홈페이지가 폭파되거나 주소가 변경된 기관은 없습니다!")
             
         st.divider()
-        
         st.write(f"💡 사이트는 정상인데 단순히 새 공고가 없는 기관: **{len(empty_df)}곳**")
         with st.expander("단순 공고 없음 기관 목록 보기"):
             st.dataframe(empty_df, use_container_width=True)
