@@ -26,10 +26,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 G2B_API_KEY = "9f7b495399ad64ec35b86f54a0a933fdf368b264bed9bcbf4e9b11556b6c9ff9"
 # ==========================================
 
-# 기존 코드:
-# target_date_limit = datetime.now() - timedelta(days=DAYS_AGO)
-
-# 변경할 코드 (0 입력 시 오늘 자정(00:00:00)부터 수집하도록 보정):
+# 🌟 0입력 시 당일 수집 완벽 대응 로직
 if len(sys.argv) >= 3:
     DAYS_AGO = int(sys.argv[1])
     TARGET_KEYWORDS = [word.strip() for word in sys.argv[2].split(',')]
@@ -42,17 +39,18 @@ if DAYS_AGO == 0:
 else:
     target_date_limit = datetime.now() - timedelta(days=DAYS_AGO)
 
+current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
 BOARD_MENU_KEYWORDS = ["공지", "알림", "고시", "소식", "입찰", "발주", "게시판"] 
 ORG_NAME_COL_INDEX = 2 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INPUT_EXCEL = os.path.join(BASE_DIR, '등록명부 정리시트.xlsx')
 
-target_date_limit = datetime.now() - timedelta(days=DAYS_AGO)
-current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-# 🌟 [특이사항 추출 키워드 설정] - 안전진단 맞춤형 적용!
-SPECIAL_KWS = ["지역제한", "안전진단", "종합", "건설", "토목", "교량", "제한경쟁", "면허", "자격"]
+# 🌟 [특이사항 및 스마트 지역 분석 키워드 설정]
+SPECIAL_KWS = ["안전진단", "종합", "건설", "토목", "교량", "제한경쟁", "면허", "자격"]
+REGION_KWS = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주']
+REGION_HINT_KWS = ['지역제한', '소재지', '영업소', '한정', '관내', '소재한', '위치한']
 
 # ==========================================
 try:
@@ -101,18 +99,20 @@ def discover_additional_boards(base_url, domain):
     except: pass
     return list(discovered_urls)[:3] 
 
+# 🌟 첨부파일을 능동적으로 열어보고 지역제한을 추리하는 스마트 딥스캔!
 def deep_scan_notice(url):
     found_specials = set()
+    found_regions = set()
+    full_text = ""
+    
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         res = requests.get(url, headers=headers, verify=False, timeout=7)
         res.encoding = 'utf-8'
         soup = BeautifulSoup(res.text, 'html.parser')
-        page_text = soup.get_text()
         
-        for kw in SPECIAL_KWS:
-            if kw in page_text: found_specials.add(kw)
-            
+        full_text += soup.get_text()
+        
         for a in soup.find_all('a', href=True):
             href = a['href'].lower()
             if href.endswith('.pdf') or href.endswith('.hwp'):
@@ -123,17 +123,33 @@ def deep_scan_notice(url):
                         content = f_res.content
                         if href.endswith('.pdf'):
                             reader = PdfReader(io.BytesIO(content))
-                            for page in reader.pages[:3]:
-                                for kw in SPECIAL_KWS:
-                                    if kw in page.extract_text(): found_specials.add(kw)
+                            for page in reader.pages[:3]: 
+                                full_text += " " + page.extract_text()
                         elif href.endswith('.hwp'):
                             f = olefile.OleFileIO(io.BytesIO(content))
                             if f.exists('PrvText'):
                                 prv = f.openstream('PrvText').read().decode('utf-16le', errors='ignore')
-                                for kw in SPECIAL_KWS:
-                                    if kw in prv: found_specials.add(kw)
+                                full_text += " " + prv
                 except: pass
+                
+        # --- 🤖 능동 분석 시작 ---
+        for kw in SPECIAL_KWS:
+            if kw in full_text: found_specials.add(kw)
+            
+        is_region_restricted = any(hint in full_text for hint in REGION_HINT_KWS)
+        
+        if is_region_restricted:
+            for r in REGION_KWS:
+                if r in full_text:
+                    found_regions.add(r)
+            
+            if found_regions:
+                found_specials.add(f"지역제한({','.join(list(found_regions))})")
+            else:
+                found_specials.add("지역제한(상세확인)")
+                
     except: pass
+    
     return "🔥 " + ", ".join(list(found_specials)) if found_specials else "-"
 
 def smart_scrape_board(url, domain, org_name):
@@ -282,7 +298,7 @@ try:
 except:
     all_sites = EXTRA_SITES
 
-# 🌟 [신규] 건강 진단 탑재!
+# 건강 진단 탑재!
 def process_site(site):
     base_url, org_name = site['url'], site['org_name']
     domain = get_domain(base_url)
@@ -328,7 +344,7 @@ def process_site(site):
 
 all_notices, empty_sites = [], []
 
-print(f"[시작] 🚀 튜닝 모드 (셀레니움+딥스캔+건강진단) 가동 (로봇 3대 병렬 투입)")
+print(f"[시작] 🚀 튜닝 모드 (셀레니움+스마트 딥스캔+건강진단) 가동 (로봇 3대 병렬 투입)")
 with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
     future_to_site = {executor.submit(process_site, site): site for site in all_sites}
     for i, future in enumerate(concurrent.futures.as_completed(future_to_site), 1):
