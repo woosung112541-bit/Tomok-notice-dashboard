@@ -20,12 +20,21 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 G2B_API_KEY = "9f7b495399ad64ec35b86f54a0a933fdf368b264bed9bcbf4e9b11556b6c9ff9"
 # ==========================================
 
+# 기존 코드:
+# target_date_limit = datetime.now() - timedelta(days=DAYS_AGO)
+
+# 변경할 코드 (0 입력 시 오늘 자정(00:00:00)부터 수집하도록 보정):
 if len(sys.argv) >= 3:
     DAYS_AGO = int(sys.argv[1])
     TARGET_KEYWORDS = [word.strip() for word in sys.argv[2].split(',')]
 else:
     DAYS_AGO = 15
     TARGET_KEYWORDS = ["안전", "모집", "지정", "공고", "용역"]
+
+if DAYS_AGO == 0:
+    target_date_limit = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+else:
+    target_date_limit = datetime.now() - timedelta(days=DAYS_AGO)
 
 BOARD_MENU_KEYWORDS = ["공지", "알림", "고시", "소식", "입찰", "발주", "게시판"] 
 ORG_NAME_COL_INDEX = 2 
