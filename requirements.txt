@@ -9,3 +9,6 @@ gspread
 gspread
 selenium
 webdriver-manager
+
+pypdf
+olefile
