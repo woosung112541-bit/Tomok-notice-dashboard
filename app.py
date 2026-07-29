@@ -27,7 +27,7 @@ menu = st.sidebar.radio(
     "이동할 메뉴를 선택하세요:",
     [
         "🚀 공고 자동 수집 (구글시트)", 
-        "📊 공고 통계 및 분석 (참고용)",   # 🌟 신규 통계 메뉴 추가!
+        "📊 공고 통계 및 분석 (참고용)",
         "🏛️ 공고 수집 성공 기관", 
         "⚠️ 추가검토 필요 기관 (미수집)"
     ]
@@ -35,7 +35,7 @@ menu = st.sidebar.radio(
 st.sidebar.divider()
 
 # ==========================================
-# 1. 🚀 공고 자동 수집 메뉴 (기존과 동일)
+# 1. 🚀 공고 자동 수집 메뉴
 # ==========================================
 if menu == "🚀 공고 자동 수집 (구글시트)":
     st.title("🚀 공고 자동 수집 & 실시간 검색 (특이사항 스캔)")
@@ -97,7 +97,7 @@ if menu == "🚀 공고 자동 수집 (구글시트)":
         st.info("아직 구글 시트에 수집된 데이터가 없거나, 시트가 비어있습니다.")
 
 # ==========================================
-# 🌟 2. 📊 공고 통계 및 분석 메뉴 (신규 추가!)
+# 🌟 2. 📊 공고 통계 및 분석 메뉴
 # ==========================================
 elif menu == "📊 공고 통계 및 분석 (참고용)":
     st.title("📊 공고 통계 및 분석 대시보드")
@@ -106,7 +106,6 @@ elif menu == "📊 공고 통계 및 분석 (참고용)":
     df = get_google_sheet("notices")
 
     if not df.empty and '공고제목' in df.columns:
-        # 1. 핵심 요약 수치 (Metrics)
         total_notices = len(df)
         total_orgs = df['출처'].nunique()
         
@@ -114,7 +113,6 @@ elif menu == "📊 공고 통계 및 분석 (참고용)":
         col1.metric("총 누적 수집 공고", f"{total_notices} 건")
         col2.metric("공고 발주 기관 수", f"{total_orgs} 곳")
         
-        # 가장 최근 등록일 구하기
         if '등록일' in df.columns:
             parsed_dates = pd.to_datetime(df['등록일'].astype(str).str.replace('.', '-'), errors='coerce').dropna()
             if not parsed_dates.empty:
@@ -123,36 +121,42 @@ elif menu == "📊 공고 통계 및 분석 (참고용)":
 
         st.divider()
 
-        # 차트를 좌우로 배치
         chart_col1, chart_col2 = st.columns(2)
 
         with chart_col1:
-            # 2. 발주처 Top 10 (막대 그래프)
             st.subheader("🏆 공고 최다 발주처 Top 10")
             org_counts = df['출처'].value_counts().head(10)
             st.bar_chart(org_counts)
 
         with chart_col2:
-            # 3. 특이사항 발생 빈도 (막대 그래프)
             if '특이사항' in df.columns:
-                st.subheader("🔥 주요 특이사항(제한조건) 발생 빈도")
-                # '-' 인 경우 제외하고 키워드만 추출
-                special_df = df[df['특이사항'].astype(str) != '-']
+                st.subheader("🔥 주요 특이사항 발생 빈도")
+                
+                # 🌟 [개선점] '아무런 특이사항 없음(-)' 및 빈칸을 완벽하게 걸러내는 필터
+                ignore_words = ['-', 'nan', 'none', '', '없음']
+                valid_specials = df['특이사항'].astype(str).str.strip()
+                
+                # '-' 기호나 'nan'이 아닌 진짜 데이터만 추출
+                special_df = df[~valid_specials.str.lower().isin(ignore_words)]
+                
                 if not special_df.empty:
-                    # '🔥 지역제한, 토목' -> ['지역제한', '토목'] 으로 분리하여 카운트
-                    specials_list = special_df['특이사항'].astype(str).str.replace('🔥 ', '').str.split(', ')
-                    all_specials = [item.strip() for sublist in specials_list for item in sublist]
-                    special_counts = pd.Series(all_specials).value_counts().head(10)
-                    st.bar_chart(special_counts)
+                    # '🔥' 기호를 제거하고 쉼표로 분리
+                    specials_list = special_df['특이사항'].astype(str).str.replace('🔥', '').str.split(',')
+                    # 리스트를 평탄화하면서 공백 및 빈문자열 한번 더 제거
+                    all_specials = [item.strip() for sublist in specials_list if isinstance(sublist, list) for item in sublist if item.strip() and item.strip().lower() not in ignore_words]
+                    
+                    if all_specials:
+                        special_counts = pd.Series(all_specials).value_counts().head(10)
+                        st.bar_chart(special_counts)
+                    else:
+                        st.write("유의미한 특이사항 데이터가 없습니다.")
                 else:
-                    st.write("아직 수집된 특이사항 데이터가 없습니다.")
+                    st.write("유의미한 특이사항 데이터가 없습니다.")
 
-        # 4. 일별 발주 추이 (꺾은선 그래프) - 하단 전체 너비 사용
         st.subheader("📈 최근 일별 공고 발주 추이")
         if '등록일' in df.columns and not parsed_dates.empty:
             df['날짜포맷'] = parsed_dates
             date_counts = df['날짜포맷'].value_counts().sort_index()
-            # 최근 30일 데이터만 잘라서 보여줌
             recent_date_counts = date_counts.tail(30)
             st.line_chart(recent_date_counts)
 
