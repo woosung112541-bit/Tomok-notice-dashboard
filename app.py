@@ -175,7 +175,7 @@ elif menu == "공고 통계 및 분석":
         with top_col2:
             st.subheader("🔥 주요 특이사항 발생 빈도")
             if '특이사항' in df.columns:
-                ignore_words = ['-', 'nan', 'none', '', '없음']
+                ignore_words = ['-', 'nan', 'none', '', '없음', '소방']
                 valid_specials = df['특이사항'].astype(str).str.strip()
                 special_df = df[~valid_specials.str.lower().isin(ignore_words)]
                 
