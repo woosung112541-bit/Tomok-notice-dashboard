@@ -12,3 +12,4 @@ webdriver-manager
 
 pypdf
 olefile
+plotly
