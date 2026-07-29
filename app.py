@@ -24,22 +24,29 @@ st.sidebar.divider()
 if menu == "🚀 공고 자동 수집":
     st.title("🚀 공고 자동 수집 & 실시간 검색")
     
-    # 🌟 [신규 기능] 대시보드에서 수집 기간 및 키워드 직접 설정
-    st.info("💡 아래에서 수집을 원하는 기간과 키워드를 지정한 후 실행 버튼을 눌러주세요. (텔레그램 알림 없이 여기에 모두 모입니다!)")
+    st.info("💡 아래에서 수집을 원하는 기간과 키워드를 지정하고, 사용할 엔진을 선택하세요.")
     
     col1, col2 = st.columns([1, 2])
     with col1:
-        collect_days = st.number_input("📅 수집 기간 (최근 며칠간의 공고를 가져올까요?)", min_value=1, max_value=365, value=15, step=1)
+        collect_days = st.number_input("📅 수집 기간 (최근 며칠간?)", min_value=1, max_value=365, value=15, step=1)
     with col2:
-        collect_keywords = st.text_input("🔑 수집 키워드 (쉼표로 구분하여 입력)", value="안전, 모집, 지정, 공고, 용역")
+        collect_keywords = st.text_input("🔑 수집 키워드 (쉼표 구분)", value="안전, 모집, 지정, 공고, 용역")
 
-    # 1. 수집 버튼
+    # ★ 모드 선택 스위치 추가!
+    engine_choice = st.radio(
+        "⚙️ 수집 엔진 선택",
+        ["⚡ 초고속 순정 모드 (권장: 4분 이내, 매우 안정적)", "🔬 정밀 튜닝 모드 (셀레니움 탑재: 아이건설넷 등 보안 우회용, 다소 느림)"]
+    )
+
+    # 수집 버튼
     if st.button("🚀 지금 즉시 공고 수집 실행", type="primary"):
-        with st.status(f"🚀 최근 {collect_days}일간의 공고를 수집 중입니다...", expanded=True) as status:
+        # 사용자가 선택한 모드에 따라 실행할 파이썬 파일 결정
+        target_script = "main_pure.py" if "순정" in engine_choice else "main.py"
+        
+        with st.status(f"🚀 [{target_script}] 로봇 출동! 데이터를 수집 중입니다...", expanded=True) as status:
             try:
-                # 사용자가 입력한 날짜와 키워드를 main.py로 전달
                 process = subprocess.Popen(
-                    [sys.executable, "-u", "main.py", str(collect_days), collect_keywords],
+                    [sys.executable, "-u", target_script, str(collect_days), collect_keywords],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
@@ -55,7 +62,7 @@ if menu == "🚀 공고 자동 수집":
 
                 if process.returncode == 0:
                     status.update(label="✅ 공고 수집 완료!", state="complete", expanded=False)
-                    st.success("수집이 성공적으로 마무리되었습니다. 아래 표를 확인하세요!")
+                    st.success(f"수집이 성공적으로 마무리되었습니다. ({target_script} 실행 완료)")
                 else:
                     status.update(label="❌ 수집 실패 (오류 발생)", state="error", expanded=True)
                     st.error("수집 도중 오류가 발생했습니다.")
@@ -72,13 +79,11 @@ if menu == "🚀 공고 자동 수집":
     if os.path.exists(output_file):
         df = pd.read_excel(output_file)
 
-        # 🔍 [사이드바 검색 필터]
         st.sidebar.subheader("🔍 공고 실시간 검색")
         search_keyword = st.sidebar.text_input("공고제목 / 키워드 검색", "")
         search_org = st.sidebar.text_input("발주기관(출처) 검색", "")
         date_range = st.sidebar.date_input("등록일자 범위 지정", [])
 
-        # 검색 필터링 로직
         filtered_df = df.copy()
         
         if search_keyword:
@@ -93,7 +98,6 @@ if menu == "🚀 공고 자동 수집":
 
         st.subheader(f"📋 수집된 맞춤 공고 목록 (검색 결과: {len(filtered_df)}건 / 전체: {len(df)}건)")
 
-        # 전체 목록 표 출력 (상세링크 클릭 가능)
         st.dataframe(
             filtered_df,
             column_config={"상세링크": st.column_config.LinkColumn("상세링크")},
