@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import gspread
+import plotly.express as px  # 🌟 줌인/줌아웃이 완벽한 고급 그래프 엔진 탑재!
 
 # 화면 기본 설정이 무조건 가장 먼저 와야 합니다!
 st.set_page_config(page_title="맞춤 공고 수집 대시보드", layout="wide")
@@ -152,7 +153,6 @@ elif menu == "공고 통계 및 분석":
 
         st.divider()
         
-        # [상단 1열] 좌측: 지역별 통계 / 우측: 주요 특이사항 빈도
         top_col1, top_col2 = st.columns(2)
         
         with top_col1:
@@ -189,28 +189,41 @@ elif menu == "공고 통계 및 분석":
 
         st.divider()
         
-        # ========================================================
-        # 🔥 수정한 포인트: X축, Y축 늘어짐 방지 & area_chart 적용
-        # ========================================================
         bottom_col1, bottom_col2 = st.columns(2)
         
+        # 🌟 수정한 포인트: 마우스 휠 축소/확대가 완벽한 Plotly 시각화 엔진 도입
         with bottom_col1:
             st.subheader("📈 전체 공고 발주 추이 (연도/일별 통합)")
             if '등록일' in df.columns and not parsed_dates.empty:
-                # 1. 미래 날짜, 과거 날짜(수집기 오류) 제거 -> X축 무한 팽창 방지
                 today = pd.Timestamp.now()
                 valid_dates = parsed_dates[(parsed_dates.dt.year >= 2022) & (parsed_dates <= today + pd.Timedelta(days=1))]
                 
                 if not valid_dates.empty:
-                    # 2. 최근 30일 제한 해제 -> 전체 누적 데이터 사용
                     date_counts = valid_dates.value_counts().sort_index()
-                    
-                    # 3. 공고가 0건인 날짜를 0으로 채워줌 -> 줌아웃 시 그래프 이빨 빠짐 방지
                     full_range = pd.date_range(start=date_counts.index.min(), end=today)
                     date_counts = date_counts.reindex(full_range, fill_value=0)
                     
-                    # 4. Y축을 0부터 예쁘게 잡아주는 area_chart로 변경 (선그래프 대신 시각적으로 뛰어남)
-                    st.area_chart(date_counts)
+                    # Plotly를 이용한 동적 그래프 생성
+                    chart_df = date_counts.reset_index()
+                    chart_df.columns = ['날짜', '공고 건수']
+                    
+                    fig = px.area(chart_df, x='날짜', y='공고 건수')
+                    
+                    # 휠 줌인/줌아웃 시 축을 똑똑하게 변환 & 버튼 추가
+                    fig.update_xaxes(
+                        rangeslider_visible=True, # 하단 스크롤바 생성
+                        rangeselector=dict(
+                            buttons=list([
+                                dict(count=1, label="1개월", step="month", stepmode="backward"),
+                                dict(count=6, label="6개월", step="month", stepmode="backward"),
+                                dict(count=1, label="1년", step="year", stepmode="backward"),
+                                dict(step="all", label="전체 보기")
+                            ])
+                        )
+                    )
+                    fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), hovermode="x unified")
+                    
+                    st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.info("유효한 날짜 데이터가 없습니다.")
             else:
@@ -224,24 +237,37 @@ elif menu == "공고 통계 및 분석":
         st.info("통계를 표시할 데이터가 부족합니다.")
 
 # ==========================================
-# 3. 공고수집성공기관 메뉴
+# 3. 공고수집성공기관 메뉴 (오류 완전 방어 및 데이터프레임 구조)
 # ==========================================
 elif menu == "공고수집성공기관":
     st.title("🏛️ 공고 수집 성공 기관 목록")
     try:
         df_orgs = get_google_sheet("collected_orgs")
-        if not df_orgs.empty and 'org_name' in df_orgs.columns:
-            org_list = df_orgs['org_name'].dropna().tolist()
-            if org_list:
-                for org in org_list:
-                    if str(org).strip(): 
-                        st.write(f"- ✅ **{org}**")
-            else:
-                st.info("수집 성공한 기관 목록이 비어 있습니다.")
+        
+        if df_orgs.empty:
+            st.warning("아직 수집된 성공 기관 데이터가 없거나 시트가 비어있습니다. '공고 자동수집'을 먼저 진행해주세요.")
         else:
-            st.warning("아직 수집된 성공 기관 데이터가 없습니다. 공고 수집을 먼저 실행해 주세요.")
+            # 시트의 첫 번째 열(Column) 데이터를 무조건 가져오도록 안전장치 적용
+            first_col_name = df_orgs.columns[0]
+            org_list = df_orgs[first_col_name].dropna().astype(str).unique().tolist()
+            
+            # 빈칸이나 'nan' 등 쓰레기값 필터링
+            clean_org_list = [org.strip() for org in org_list if org.strip() and org.lower() != 'nan']
+            
+            if clean_org_list:
+                st.success(f"🎉 총 {len(clean_org_list)}개 기관에서 성공적으로 공고를 수집했습니다!")
+                
+                # 텍스트로 쏟아내서 뻗는 현상을 막기 위해 예쁜 표(Dataframe) 형태로 출력
+                display_df = pd.DataFrame({"✅ 수집 완료 기관 명단": clean_org_list})
+                display_df.index += 1  # 순번이 1부터 시작하도록 조작
+                
+                st.dataframe(display_df, use_container_width=True)
+            else:
+                st.info("수집에 성공한 기관 목록 데이터가 없습니다.")
+                
     except Exception as e:
-        st.error("데이터를 불러오는 중 오류가 발생했습니다. 수집을 먼저 실행해 주세요.")
+        # 혹시라도 에러가 나면 무슨 에러인지 빨간 박스로 명확히 보여줌
+        st.error(f"데이터를 불러오는 중 예상치 못한 오류가 발생했습니다.\n(상세 원인: {e})")
 
 # ==========================================
 # 4. 사이트 검토 필요(오류/개편) 메뉴
@@ -270,4 +296,4 @@ elif menu == "사이트 검토 필요(오류/개편)":
         else:
             st.success("점검 기록이 없습니다. 먼저 공고 수집을 실행해 주세요!")
     except Exception as e:
-        st.error("점검 데이터를 불러오는 중 오류가 발생했습니다.")
+        st.error(f"점검 데이터를 불러오는 중 오류가 발생했습니다. ({e})")
