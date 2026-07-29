@@ -1,4 +1,3 @@
-import json
 import os
 import requests
 from bs4 import BeautifulSoup
@@ -10,6 +9,7 @@ import time
 import sys
 import re
 import concurrent.futures
+import sqlite3  # 🌟 [신규 장착] 데이터베이스 라이브러리 (파이썬 기본 내장)
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -29,20 +29,34 @@ ORG_NAME_COL_INDEX = 2
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INPUT_EXCEL = os.path.join(BASE_DIR, '등록명부 정리시트.xlsx')
-OUTPUT_EXCEL = os.path.join(BASE_DIR, '통합_맞춤공고.xlsx')
-CHECK_EXCEL = os.path.join(BASE_DIR, '수동확인_필요목록.xlsx')
-COLLECTED_ORGS_FILE = os.path.join(BASE_DIR, 'collected_orgs.json')
+DB_PATH = os.path.join(BASE_DIR, 'notices.db') # 🌟 DB 파일 경로
 
 target_date_limit = datetime.now() - timedelta(days=DAYS_AGO)
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+# ==========================================
+# 🌟 [DB 초기화 및 테이블 생성 함수]
+# ==========================================
+def init_db():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    # 1. 공고 저장 테이블 (notice_key를 고유값으로 지정하여 완벽한 중복 방지)
+    c.execute('''CREATE TABLE IF NOT EXISTS notices 
+                 (org_name TEXT, post_date TEXT, title TEXT, link TEXT, notice_key TEXT UNIQUE, created_at TEXT)''')
+    # 2. 수집 성공 기관 테이블
+    c.execute('''CREATE TABLE IF NOT EXISTS collected_orgs (org_name TEXT UNIQUE)''')
+    # 3. 미수집(확인 필요) 기관 테이블
+    c.execute('''CREATE TABLE IF NOT EXISTS empty_orgs (org_name TEXT UNIQUE, url TEXT, status TEXT)''')
+    conn.commit()
+    return conn
+
+# DB 연결 및 수집 성공 기관 로드
+db_conn = init_db()
 collected_orgs = set()
-if os.path.exists(COLLECTED_ORGS_FILE):
-    try:
-        with open(COLLECTED_ORGS_FILE, 'r', encoding='utf-8') as f:
-            collected_orgs = set(json.load(f))
-    except Exception:
-        pass
+cursor = db_conn.cursor()
+cursor.execute("SELECT org_name FROM collected_orgs")
+for row in cursor.fetchall():
+    collected_orgs.add(row[0])
 
 COMMON_ROW_SELECTORS = [
     "table.board_list tbody tr", 
@@ -70,13 +84,10 @@ def discover_additional_boards(base_url, domain):
                 text = a_tag.get_text(strip=True)
                 href = a_tag['href']
                 if any(keyword in text for keyword in BOARD_MENU_KEYWORDS):
-                    if "javascript:" in href.lower() or href == "#":
-                        continue
+                    if "javascript:" in href.lower() or href == "#": continue
                     full_url = urllib.parse.urljoin(base_url, href)
-                    if domain in full_url: 
-                        discovered_urls.add(full_url)
-    except Exception:
-        pass
+                    if domain in full_url: discovered_urls.add(full_url)
+    except Exception: pass
     return list(discovered_urls)[:3] 
 
 def smart_scrape_board(url, domain, org_name):
@@ -98,10 +109,7 @@ def smart_scrape_board(url, domain, org_name):
                 if title_tag:
                     title = title_tag.get_text(strip=True)
                     href = title_tag.get('href', '').strip()
-                    if "javascript:" in href.lower() or href == "#" or "void(" in href.lower() or not href:
-                        link = url 
-                    else:
-                        link = urllib.parse.urljoin(url, href)
+                    link = url if "javascript:" in href.lower() or href == "#" or not href else urllib.parse.urljoin(url, href)
                         
                     date_str, post_date = "", None
                     for text in row.stripped_strings:
@@ -118,8 +126,7 @@ def smart_scrape_board(url, domain, org_name):
                     if post_date and post_date >= target_date_limit:
                         if any(keyword in title for keyword in TARGET_KEYWORDS):
                             results.append({'출처': org_name, '등록일': date_str, '공고제목': title, '상세링크': link})
-    except Exception:
-        pass
+    except Exception: pass
     return results
 
 def fetch_g2b_api(api_key, days_ago, keywords):
@@ -178,7 +185,7 @@ def process_site(site):
 
 all_notices, empty_sites = [], []
 
-print(f"[시작] 🚀 초고속 순정 엔진을 가동합니다. (로봇 5대 병렬 투입)")
+print(f"[시작] 🚀 초고속 순정 엔진 (DB 버전)을 가동합니다. (로봇 5대 병렬 투입)")
 with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
     future_to_site = {executor.submit(process_site, site): site for site in all_sites}
     for i, future in enumerate(concurrent.futures.as_completed(future_to_site), 1):
@@ -198,18 +205,33 @@ if g2b_notices:
     print(f"🎉 [성공] 조달청 나라장터에서 {len(g2b_notices)}건 수집 완료!")
     all_notices.extend(g2b_notices)
 
-with open(COLLECTED_ORGS_FILE, 'w', encoding='utf-8') as f:
-    json.dump(list(collected_orgs), f, ensure_ascii=False, indent=4)
+# ==========================================
+# 🌟 [DB에 데이터 저장 (INSERT)]
+# ==========================================
+new_count = 0
+for item in all_notices:
+    notice_key = f"{item['출처']}|||{item['공고제목']}"
+    try:
+        # INSERT OR IGNORE: 중복된 notice_key가 들어오면 무시함 (완벽한 중복 방지)
+        cursor.execute('''INSERT OR IGNORE INTO notices (org_name, post_date, title, link, notice_key, created_at)
+                          VALUES (?, ?, ?, ?, ?, ?)''', 
+                       (item['출처'], item['등록일'], item['공고제목'], item['상세링크'], notice_key, current_time))
+        if cursor.rowcount > 0:
+            new_count += 1
+    except Exception as e:
+        pass
 
-if all_notices:
-    df_output = pd.DataFrame(all_notices).drop_duplicates(subset=['출처', '공고제목'])
-    df_output.to_excel(OUTPUT_EXCEL, index=False)
-    print(f"\n[종료] 총 {len(df_output)}건의 맞춤 공고 수집이 완료되었습니다. 대시보드에서 확인하세요!")
-else:
-    pd.DataFrame([{'출처': '-', '등록일': '-', '공고제목': "조건에 부합하는 공고가 없습니다.", '상세링크': '-'}]).to_excel(OUTPUT_EXCEL, index=False)
-    print(f"\n[종료] 조건에 부합하는 신규 데이터가 없습니다.")
+for org in collected_orgs:
+    cursor.execute('''INSERT OR IGNORE INTO collected_orgs (org_name) VALUES (?)''', (org,))
 
-if empty_sites:
-    filtered = [s for s in empty_sites if s['출처기관'] not in collected_orgs]
-    if filtered: pd.DataFrame(filtered).to_excel(CHECK_EXCEL, index=False)
-    elif os.path.exists(CHECK_EXCEL): os.remove(CHECK_EXCEL)
+# 테이블 비우고 최신 미수집 기관 업데이트
+cursor.execute('DELETE FROM empty_orgs')
+for empty in empty_sites:
+    if empty['출처기관'] not in collected_orgs:
+        cursor.execute('''INSERT OR IGNORE INTO empty_orgs (org_name, url, status) VALUES (?, ?, ?)''',
+                       (empty['출처기관'], empty['게시판_URL'], empty['분류']))
+
+db_conn.commit()
+db_conn.close()
+
+print(f"\n[종료] 총 {len(all_notices)}건 탐색 중, DB에 신규 공고 {new_count}건 저장 완료! 대시보드에서 확인하세요!")
