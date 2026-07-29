@@ -25,10 +25,18 @@ def get_google_sheet(sheet_name):
 st.sidebar.title("📌 메뉴 선택")
 menu = st.sidebar.radio(
     "이동할 메뉴를 선택하세요:",
-    ["🚀 공고 자동 수집 (구글시트)", "🏛️ 공고 수집 성공 기관", "⚠️ 추가검토 필요 기관 (미수집)"]
+    [
+        "🚀 공고 자동 수집 (구글시트)", 
+        "📊 공고 통계 및 분석 (참고용)",   # 🌟 신규 통계 메뉴 추가!
+        "🏛️ 공고 수집 성공 기관", 
+        "⚠️ 추가검토 필요 기관 (미수집)"
+    ]
 )
 st.sidebar.divider()
 
+# ==========================================
+# 1. 🚀 공고 자동 수집 메뉴 (기존과 동일)
+# ==========================================
 if menu == "🚀 공고 자동 수집 (구글시트)":
     st.title("🚀 공고 자동 수집 & 실시간 검색 (특이사항 스캔)")
     st.info("💡 공고 상세페이지 및 첨부파일을 스캔하여 [지역제한, 면허] 등의 특이사항을 자동으로 잡아냅니다!")
@@ -82,15 +90,78 @@ if menu == "🚀 공고 자동 수집 (구글시트)":
                 filtered_df = filtered_df[(parsed_dates >= start_date) & (parsed_dates <= end_date)]
 
             st.subheader(f"📋 누적 공고 (검색 결과: {len(filtered_df)}건 / 전체: {len(df)}건)")
-            
-            # 🌟 표 화면 정리 (내부용 시스템 키인 notice_key와 created_at은 숨기고 핵심만 보여줌)
             display_columns = ['출처', '등록일', '공고제목', '특이사항', '상세링크']
             display_df = filtered_df[[c for c in display_columns if c in filtered_df.columns]]
-            
             st.dataframe(display_df, column_config={"상세링크": st.column_config.LinkColumn("상세링크")}, use_container_width=True)
     else:
         st.info("아직 구글 시트에 수집된 데이터가 없거나, 시트가 비어있습니다.")
 
+# ==========================================
+# 🌟 2. 📊 공고 통계 및 분석 메뉴 (신규 추가!)
+# ==========================================
+elif menu == "📊 공고 통계 및 분석 (참고용)":
+    st.title("📊 공고 통계 및 분석 대시보드")
+    st.info("수집된 데이터(구글 시트)를 바탕으로 우리 타겟 시장의 발주 흐름을 가볍게 파악해 보세요.")
+
+    df = get_google_sheet("notices")
+
+    if not df.empty and '공고제목' in df.columns:
+        # 1. 핵심 요약 수치 (Metrics)
+        total_notices = len(df)
+        total_orgs = df['출처'].nunique()
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("총 누적 수집 공고", f"{total_notices} 건")
+        col2.metric("공고 발주 기관 수", f"{total_orgs} 곳")
+        
+        # 가장 최근 등록일 구하기
+        if '등록일' in df.columns:
+            parsed_dates = pd.to_datetime(df['등록일'].astype(str).str.replace('.', '-'), errors='coerce').dropna()
+            if not parsed_dates.empty:
+                latest_date = parsed_dates.max().strftime('%Y-%m-%d')
+                col3.metric("마지막 발주(등록) 일자", latest_date)
+
+        st.divider()
+
+        # 차트를 좌우로 배치
+        chart_col1, chart_col2 = st.columns(2)
+
+        with chart_col1:
+            # 2. 발주처 Top 10 (막대 그래프)
+            st.subheader("🏆 공고 최다 발주처 Top 10")
+            org_counts = df['출처'].value_counts().head(10)
+            st.bar_chart(org_counts)
+
+        with chart_col2:
+            # 3. 특이사항 발생 빈도 (막대 그래프)
+            if '특이사항' in df.columns:
+                st.subheader("🔥 주요 특이사항(제한조건) 발생 빈도")
+                # '-' 인 경우 제외하고 키워드만 추출
+                special_df = df[df['특이사항'].astype(str) != '-']
+                if not special_df.empty:
+                    # '🔥 지역제한, 토목' -> ['지역제한', '토목'] 으로 분리하여 카운트
+                    specials_list = special_df['특이사항'].astype(str).str.replace('🔥 ', '').str.split(', ')
+                    all_specials = [item.strip() for sublist in specials_list for item in sublist]
+                    special_counts = pd.Series(all_specials).value_counts().head(10)
+                    st.bar_chart(special_counts)
+                else:
+                    st.write("아직 수집된 특이사항 데이터가 없습니다.")
+
+        # 4. 일별 발주 추이 (꺾은선 그래프) - 하단 전체 너비 사용
+        st.subheader("📈 최근 일별 공고 발주 추이")
+        if '등록일' in df.columns and not parsed_dates.empty:
+            df['날짜포맷'] = parsed_dates
+            date_counts = df['날짜포맷'].value_counts().sort_index()
+            # 최근 30일 데이터만 잘라서 보여줌
+            recent_date_counts = date_counts.tail(30)
+            st.line_chart(recent_date_counts)
+
+    else:
+        st.warning("아직 분석할 데이터가 없습니다. 메인 탭에서 공고를 먼저 수집해 주세요!")
+
+# ==========================================
+# 3. 기관 목록 메뉴
+# ==========================================
 elif menu == "🏛️ 공고 수집 성공 기관":
     st.title("🏛️ 공고 수집 성공 기관 목록")
     df_orgs = get_google_sheet("collected_orgs")
@@ -98,6 +169,9 @@ elif menu == "🏛️ 공고 수집 성공 기관":
         for org in df_orgs['org_name'].dropna():
             if str(org).strip(): st.write(f"- ✅ **{org}**")
 
+# ==========================================
+# 4. 검토 필요 기관 메뉴
+# ==========================================
 elif menu == "⚠️ 추가검토 필요 기관 (미수집)":
     st.title("⚠️ 추가검토 필요 기관 목록")
     df_empty = get_google_sheet("empty_orgs")
