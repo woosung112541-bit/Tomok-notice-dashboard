@@ -5,6 +5,7 @@ import subprocess
 import sys
 import gspread
 import plotly.express as px
+import time
 
 # 화면 기본 설정이 무조건 가장 먼저 와야 합니다!
 st.set_page_config(page_title="맞춤 공고 수집 대시보드", layout="wide")
@@ -39,6 +40,21 @@ if not check_password():
     st.stop()
 
 # ==========================================
+# 🛑 동시 접속(다중 실행) 방어용 자물쇠 함수
+# ==========================================
+LOCK_FILE = "crawler.lock"
+
+def is_collecting_now():
+    """누군가 수집 중인지 확인하는 함수 (좀비 자물쇠 방지 포함)"""
+    if os.path.exists(LOCK_FILE):
+        # 만약 에러로 인해 자물쇠가 안 풀리고 15분(900초) 이상 방치되었다면 강제로 풉니다.
+        if time.time() - os.path.getmtime(LOCK_FILE) > 900:
+            os.remove(LOCK_FILE)
+            return False
+        return True
+    return False
+
+# ==========================================
 # 구글 시트 연동 및 검토완료 처리 함수
 # ==========================================
 if "GOOGLE_CREDENTIALS" in st.secrets:
@@ -56,7 +72,6 @@ def get_google_sheet(sheet_name):
         return pd.DataFrame()
 
 def mark_as_reviewed(notice_keys_to_mark):
-    """현재 필터링된 공고들을 구글 시트에서 '완료'로 일괄 변경하는 함수"""
     gc = gspread.service_account(filename="google_key.json")
     doc = gc.open("맞춤공고_DB")
     worksheet = doc.worksheet("notices")
@@ -65,7 +80,6 @@ def mark_as_reviewed(notice_keys_to_mark):
     if not all_records: return
     
     headers = all_records[0]
-    # 기존 시트에 '검토유무' 열이 없다면 맨 끝에 추가 (호환성 유지)
     if "검토유무" not in headers:
         headers.append("검토유무")
         worksheet.update(range_name="1:1", values=[headers])
@@ -79,16 +93,13 @@ def mark_as_reviewed(notice_keys_to_mark):
     for row_idx, row in enumerate(all_records):
         if row_idx == 0: continue
         
-        # 이전 데이터로 인해 열 길이가 짧은 경우 빈칸으로 채움
         if len(row) <= review_col_idx:
             row.extend([""] * (review_col_idx - len(row) + 1))
         
         if row[key_col_idx] in notice_keys_to_mark:
-            # gspread는 1-index 기반이므로 row_idx+1, col_idx+1
             cell = gspread.Cell(row=row_idx+1, col=review_col_idx+1, value="완료")
             cells_to_update.append(cell)
             
-    # 한 번의 API 호출로 셀들을 일괄 업데이트 (속도 최적화)
     if cells_to_update:
         worksheet.update_cells(cells_to_update)
 
@@ -131,37 +142,50 @@ if menu == "공고 자동수집":
         "극한 탐색(최대 60초 대기/셀레니움)"
     ])
 
+    # 🌟 수집 버튼 클릭 시 자물쇠 방어 시스템 작동!
     if st.button("공고 수집", type="primary"):
-        if "빠른 탐색" in engine_choice:
-            target_script = "main_pure.py"
-        elif "정밀 탐색" in engine_choice:
-            target_script = "main.py"
+        if is_collecting_now():
+            # 누군가 이미 실행 중이라면 경고창을 띄우고 실행을 차단합니다.
+            st.warning("⏳ 현재 다른 팀원이 공고를 수집하고 있습니다. 서버 보호를 위해 잠시 후 새로고침(F5)을 눌러주세요!")
         else:
-            target_script = "main_max.py"
-            
-        with st.status(f"🚀 [{target_script}] 로봇 출동! 데이터를 수집 중입니다...", expanded=True) as status:
-            try:
-                process = subprocess.Popen(
-                    [sys.executable, "-u", target_script, str(collect_days), collect_keywords],
-                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', bufsize=1
-                )
-                for line in iter(process.stdout.readline, ''):
-                    if line: st.write(line.strip())
-                process.wait()
+            if "빠른 탐색" in engine_choice:
+                target_script = "main_pure.py"
+            elif "정밀 탐색" in engine_choice:
+                target_script = "main.py"
+            else:
+                target_script = "main_max.py"
+                
+            with st.status(f"🚀 [{target_script}] 로봇 출동! 데이터를 수집 중입니다...", expanded=True) as status:
+                try:
+                    # 🔒 수집 시작 시 자물쇠 생성
+                    with open(LOCK_FILE, "w") as f:
+                        f.write("running")
+                        
+                    process = subprocess.Popen(
+                        [sys.executable, "-u", target_script, str(collect_days), collect_keywords],
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', bufsize=1
+                    )
+                    for line in iter(process.stdout.readline, ''):
+                        if line: st.write(line.strip())
+                    process.wait()
 
-                if process.returncode == 0:
-                    status.update(label="✅ 공고 수집 완료!", state="complete", expanded=False)
-                else:
-                    status.update(label="❌ 수집 실패", state="error", expanded=True)
-            except Exception as e:
-                status.update(label="❌ 시스템 오류", state="error", expanded=True)
-        st.rerun()
+                    if process.returncode == 0:
+                        status.update(label="✅ 공고 수집 완료!", state="complete", expanded=False)
+                    else:
+                        status.update(label="❌ 수집 실패", state="error", expanded=True)
+                except Exception as e:
+                    status.update(label="❌ 시스템 오류", state="error", expanded=True)
+                finally:
+                    # 🔓 수집이 끝났거나 오류가 나도 무조건 자물쇠를 풉니다!
+                    if os.path.exists(LOCK_FILE):
+                        os.remove(LOCK_FILE)
+                        
+            st.rerun()
 
     st.divider()
 
     df = get_google_sheet("notices")
     if not df.empty and '공고제목' in df.columns:
-        # 기존 시트에 검토유무 열이 없을 경우 기본값으로 채워줌
         if '검토유무' not in df.columns:
             df['검토유무'] = '미검토'
             
@@ -170,17 +194,14 @@ if menu == "공고 자동수집":
         search_org = st.sidebar.text_input("발주기관(출처) 검색", "")
         date_range = st.sidebar.date_input("등록일자 범위 지정", [])
         
-        # 검토 완료된 항목 숨기기 필터 추가
         hide_reviewed = st.sidebar.checkbox("✅ 검토 완료된 공고 숨기기", value=False)
 
         filtered_df = df.copy()
         
-        # 조건부 필터링 적용
         if hide_reviewed:
             filtered_df = filtered_df[filtered_df['검토유무'] != '완료']
             
         if search_keyword: 
-            # 공고제목이나 특이사항(🔴빨강, 🔵파랑 태그 등)으로 텍스트 필터링
             filtered_df = filtered_df[
                 filtered_df['공고제목'].astype(str).str.contains(search_keyword, case=False, na=False) |
                 filtered_df['특이사항'].astype(str).str.contains(search_keyword, case=False, na=False)
@@ -194,7 +215,6 @@ if menu == "공고 자동수집":
 
         st.subheader(f"📋 누적 공고 (검색 결과: {len(filtered_df)}건 / 전체: {len(df)}건)")
         
-        # 검토 완료 일괄 처리 버튼
         col_btn1, col_btn2 = st.columns([3, 1])
         with col_btn2:
             if st.button("✅ 현재 화면의 공고 모두 '검토완료' 처리", use_container_width=True):
@@ -207,14 +227,11 @@ if menu == "공고 자동수집":
                 else:
                     st.warning("처리할 공고가 없습니다.")
         
-        # 검토유무를 맨 우측에 배치
         display_columns = ['출처', '등록일', '공고제목', '특이사항', '상세링크', '검토유무']
         display_df = filtered_df[[c for c in display_columns if c in filtered_df.columns]]
         
-        # 데이터프레임 스타일링 (검토 완료된 행은 회색 처리)
         def highlight_reviewed(row):
             if row.get('검토유무') == '완료':
-                # 검토 완료된 행은 회색 바탕에 글씨를 흐리게 처리
                 return ['background-color: #f0f2f6; color: #a0aab2;'] * len(row)
             return [''] * len(row)
             
@@ -271,7 +288,6 @@ elif menu == "공고 통계 및 분석":
                 special_df = df[~valid_specials.str.lower().isin(ignore_words)]
                 
                 if not special_df.empty:
-                    # 🔴, 🔵 아이콘을 제거하고 순수 글자 빈도만 통계로 잡습니다.
                     specials_list = special_df['특이사항'].astype(str).str.replace('🔥', '').str.replace('🔴', '').str.replace('🔵', '').str.split(',')
                     all_specials = [item.strip() for sublist in specials_list if isinstance(sublist, list) for item in sublist if item.strip() and item.strip().lower() not in ignore_words]
                     if all_specials: 
