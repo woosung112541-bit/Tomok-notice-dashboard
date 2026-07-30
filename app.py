@@ -4,7 +4,7 @@ import os
 import subprocess
 import sys
 import gspread
-import plotly.express as px  # 🌟 줌인/줌아웃이 완벽한 고급 그래프 엔진 탑재!
+import plotly.express as px
 
 # 화면 기본 설정이 무조건 가장 먼저 와야 합니다!
 st.set_page_config(page_title="맞춤 공고 수집 대시보드", layout="wide")
@@ -87,14 +87,15 @@ if menu == "공고 자동수집":
     with col2: 
         collect_keywords = st.text_input("🔑 수집 키워드 (쉼표 구분)", value="안전, 모집, 지정, 공고, 용역")
 
-engine_choice = st.radio("⚙️ 수집 엔진 선택", [
+    # 🌟 3가지 엔진 모드 선택!
+    engine_choice = st.radio("⚙️ 수집 엔진 선택", [
         "빠른 탐색(열람가능 사이트)", 
         "정밀 탐색(셀레니움)",
         "극한 탐색(최대 60초 대기/셀레니움)"
     ])
 
     if st.button("공고 수집", type="primary"):
-        # 선택한 버튼에 따라 실행할 파일을 결정하는 로직
+        # 선택한 버튼에 따라 실행할 파일 매칭
         if "빠른 탐색" in engine_choice:
             target_script = "main_pure.py"
         elif "정밀 탐색" in engine_choice:
@@ -186,6 +187,7 @@ elif menu == "공고 통계 및 분석":
         with top_col2:
             st.subheader("🔥 주요 특이사항 발생 빈도")
             if '특이사항' in df.columns:
+                # 🌟 소방 제거 포함
                 ignore_words = ['-', 'nan', 'none', '', '없음', '소방']
                 valid_specials = df['특이사항'].astype(str).str.strip()
                 special_df = df[~valid_specials.str.lower().isin(ignore_words)]
@@ -202,7 +204,6 @@ elif menu == "공고 통계 및 분석":
         
         bottom_col1, bottom_col2 = st.columns(2)
         
-        # 🌟 수정한 포인트: 마우스 휠 축소/확대가 완벽한 Plotly 시각화 엔진 도입
         with bottom_col1:
             st.subheader("📈 전체 공고 발주 추이 (연도/일별 통합)")
             if '등록일' in df.columns and not parsed_dates.empty:
@@ -214,15 +215,13 @@ elif menu == "공고 통계 및 분석":
                     full_range = pd.date_range(start=date_counts.index.min(), end=today)
                     date_counts = date_counts.reindex(full_range, fill_value=0)
                     
-                    # Plotly를 이용한 동적 그래프 생성
                     chart_df = date_counts.reset_index()
                     chart_df.columns = ['날짜', '공고 건수']
                     
                     fig = px.area(chart_df, x='날짜', y='공고 건수')
                     
-                    # 휠 줌인/줌아웃 시 축을 똑똑하게 변환 & 버튼 추가
                     fig.update_xaxes(
-                        rangeslider_visible=True, # 하단 스크롤바 생성
+                        rangeslider_visible=True,
                         rangeselector=dict(
                             buttons=list([
                                 dict(count=1, label="1개월", step="month", stepmode="backward"),
@@ -248,7 +247,7 @@ elif menu == "공고 통계 및 분석":
         st.info("통계를 표시할 데이터가 부족합니다.")
 
 # ==========================================
-# 3. 공고수집성공기관 메뉴 (오류 완전 방어 및 데이터프레임 구조)
+# 3. 공고수집성공기관 메뉴
 # ==========================================
 elif menu == "공고수집성공기관":
     st.title("🏛️ 공고 수집 성공 기관 목록")
@@ -258,26 +257,22 @@ elif menu == "공고수집성공기관":
         if df_orgs.empty:
             st.warning("아직 수집된 성공 기관 데이터가 없거나 시트가 비어있습니다. '공고 자동수집'을 먼저 진행해주세요.")
         else:
-            # 시트의 첫 번째 열(Column) 데이터를 무조건 가져오도록 안전장치 적용
             first_col_name = df_orgs.columns[0]
             org_list = df_orgs[first_col_name].dropna().astype(str).unique().tolist()
             
-            # 빈칸이나 'nan' 등 쓰레기값 필터링
             clean_org_list = [org.strip() for org in org_list if org.strip() and org.lower() != 'nan']
             
             if clean_org_list:
                 st.success(f"🎉 총 {len(clean_org_list)}개 기관에서 성공적으로 공고를 수집했습니다!")
                 
-                # 텍스트로 쏟아내서 뻗는 현상을 막기 위해 예쁜 표(Dataframe) 형태로 출력
                 display_df = pd.DataFrame({"✅ 수집 완료 기관 명단": clean_org_list})
-                display_df.index += 1  # 순번이 1부터 시작하도록 조작
+                display_df.index += 1
                 
                 st.dataframe(display_df, use_container_width=True)
             else:
                 st.info("수집에 성공한 기관 목록 데이터가 없습니다.")
                 
     except Exception as e:
-        # 혹시라도 에러가 나면 무슨 에러인지 빨간 박스로 명확히 보여줌
         st.error(f"데이터를 불러오는 중 예상치 못한 오류가 발생했습니다.\n(상세 원인: {e})")
 
 # ==========================================
