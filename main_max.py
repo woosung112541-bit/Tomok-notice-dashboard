@@ -13,8 +13,10 @@ import gspread
 import io
 import olefile
 from pypdf import PdfReader
+import logging
 
-# 🌟 무적의 크롬 브라우저 조종석 (Selenium)
+logging.getLogger("pypdf").setLevel(logging.ERROR)
+
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -26,7 +28,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 G2B_API_KEY = "9f7b495399ad64ec35b86f54a0a933fdf368b264bed9bcbf4e9b11556b6c9ff9"
 # ==========================================
 
-# 🌟 0입력 시 당일 수집 완벽 대응 로직
 if len(sys.argv) >= 3:
     DAYS_AGO = int(sys.argv[1])
     TARGET_KEYWORDS = [word.strip() for word in sys.argv[2].split(',')]
@@ -47,8 +48,8 @@ ORG_NAME_COL_INDEX = 2
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INPUT_EXCEL = os.path.join(BASE_DIR, '등록명부 정리시트.xlsx')
 
-# 🌟 [특이사항 및 스마트 지역 분석 키워드 설정]
-SPECIAL_KWS = ["안전진단", "종합", "건설", "토목", "교량", "제한경쟁", "면허", "자격"]
+PLUS_KWS = ["종합", "토목", "안전점검", "수행기관", "대전"]
+MINUS_KWS = ["건축분야", "신축", "번지", "증축", "수의", "건립"]
 REGION_KWS = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주']
 REGION_HINT_KWS = ['지역제한', '소재지', '영업소', '한정', '관내', '소재한', '위치한']
 
@@ -61,7 +62,7 @@ try:
     ws_empty = doc.worksheet("empty_orgs")
     
     if not ws_notices.get_all_values():
-        ws_notices.append_row(["출처", "등록일", "공고제목", "상세링크", "notice_key", "created_at", "특이사항"])
+        ws_notices.append_row(["출처", "등록일", "공고제목", "상세링크", "notice_key", "created_at", "특이사항", "검토유무"])
     if not ws_collected.get_all_values():
         ws_collected.append_row(["org_name"])
         
@@ -87,7 +88,6 @@ def discover_additional_boards(base_url, domain):
     headers = {'User-Agent': 'Mozilla/5.0'}
     discovered_urls = set()
     try:
-        # ⏱️ 인내심 증가: 접속 시도 15초, 응답 대기 30초
         response = requests.get(base_url, headers=headers, verify=False, timeout=(15, 30))
         soup = BeautifulSoup(response.text, 'html.parser')
         for a_tag in soup.find_all('a', href=True):
@@ -107,7 +107,6 @@ def deep_scan_notice(url):
     
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        # ⏱️ 본문 분석 인내심 증가: 최대 30초 대기
         res = requests.get(url, headers=headers, verify=False, timeout=30)
         res.encoding = 'utf-8'
         soup = BeautifulSoup(res.text, 'html.parser')
@@ -119,7 +118,6 @@ def deep_scan_notice(url):
             if href.endswith('.pdf') or href.endswith('.hwp'):
                 file_url = urllib.parse.urljoin(url, a['href'])
                 try:
-                    # ⏱️ 파일 다운로드 인내심 증가: 최대 30초 대기
                     f_res = requests.get(file_url, headers=headers, verify=False, timeout=30, stream=True)
                     if int(f_res.headers.get('content-length', 0)) < 5000000:
                         content = f_res.content
@@ -134,9 +132,11 @@ def deep_scan_notice(url):
                                 full_text += " " + prv
                 except: pass
                 
-        # --- 🤖 능동 분석 시작 ---
-        for kw in SPECIAL_KWS:
-            if kw in full_text: found_specials.add(kw)
+        for kw in PLUS_KWS:
+            if kw in full_text: found_specials.add(f"🔴{kw}")
+            
+        for kw in MINUS_KWS:
+            if kw in full_text: found_specials.add(f"🔵{kw}")
             
         is_region_restricted = any(hint in full_text for hint in REGION_HINT_KWS)
         
@@ -159,7 +159,6 @@ def smart_scrape_board(url, domain, org_name):
     results = []
     rows_found_count = 0
     try:
-        # ⏱️ 리스트 확보 인내심 증가: 접속 15초, 대기 30초
         response = requests.get(url, headers=headers, verify=False, timeout=(15, 30))
         soup = BeautifulSoup(response.text, 'html.parser')
         rows = []
@@ -215,10 +214,8 @@ def smart_scrape_board_with_selenium(url, domain, org_name):
     driver = None
     try:
         driver = get_chrome_driver()
-        # 🌟 핵심 수정 포인트: 셀레니움 페이지 로딩 최대 대기시간을 60초로 대폭 늘림 (기존 20초)
         driver.set_page_load_timeout(60)
         driver.get(url)
-        # 페이지가 뜬 후 자바스크립트가 그려질 시간을 넉넉하게 5초(기존 3초) 부여
         time.sleep(5) 
         
         soup = BeautifulSoup(driver.page_source, 'html.parser')
@@ -264,7 +261,6 @@ def fetch_g2b_api(api_key, days_ago, keywords):
     url = "http://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblancListInfoServc"
     params = {"serviceKey": api_key, "numOfRows": "999", "pageNo": "1", "inqryDiv": "1", "inqryBgnDt": start_dt, "inqryEndDt": end_dt, "type": "json"}
     try:
-        # ⏱️ 나라장터 API 대기 시간 30초로 증가 (기존 15초)
         res = requests.get(url, params=params, timeout=30)
         if res.status_code == 200:
             items = res.json().get('response', {}).get('body', {}).get('items', [])
@@ -311,7 +307,6 @@ def process_site(site):
     health_status = "공고 없음"
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        # ⏱️ 건강 진단 인내심 증가 (기존 7초 -> 30초)
         res = requests.get(base_url, headers=headers, verify=False, timeout=30)
         if res.status_code == 404: 
             health_status = "❌ 404 에러 (게시판 삭제 또는 개편 의심)"
@@ -350,7 +345,7 @@ def process_site(site):
 
 all_notices, empty_sites = [], []
 
-print("[시작] 초정밀탐색(딥스캔+셀레니움+각60초대기) 가동")
+print("[시작] 극한 탐색(최대 60초 대기/셀레니움) 가동")
 with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
     future_to_site = {executor.submit(process_site, site): site for site in all_sites}
     for i, future in enumerate(concurrent.futures.as_completed(future_to_site), 1):
@@ -375,7 +370,7 @@ for item in all_notices:
     if notice_key not in history_keys:
         new_rows.append([
             item['출처'], item['등록일'], item['공고제목'], item['상세링크'], 
-            notice_key, current_time, item.get('특이사항', '-')
+            notice_key, current_time, item.get('특이사항', '-'), "미검토"
         ])
         history_keys.add(notice_key)
 
@@ -391,4 +386,4 @@ ws_empty.append_row(['출처기관', '게시판_URL', '분류'])
 empty_rows = [[e['출처기관'], e['게시판_URL'], e['분류']] for e in empty_sites if e['출처기관'] not in collected_orgs]
 if empty_rows: ws_empty.append_rows(empty_rows)
 
-print("\n[종료] 정밀 탐색 수집 완료!")
+print("\n[종료] 극한 탐색 수집 완료!")
