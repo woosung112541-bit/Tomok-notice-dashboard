@@ -40,27 +40,50 @@ if not check_password():
     st.stop()
 
 # ==========================================
-# 🛑 동시 접속(다중 실행) 방어용 자물쇠 함수
+# 🛑 영구 불멸의 '구글 시트' 자물쇠 시스템 (클라우드 리부팅 완벽 방어)
 # ==========================================
-LOCK_FILE = "crawler.lock"
+def manage_sheet_lock(action="check"):
+    """구글 시트의 'settings' 탭을 이용해 동시 접속을 차단하는 함수"""
+    try:
+        gc = gspread.service_account(filename="google_key.json")
+        doc = gc.open("맞춤공고_DB")
+        
+        try:
+            ws = doc.worksheet("settings")
+        except gspread.exceptions.WorksheetNotFound:
+            # 설정 탭이 없으면 알아서 새로 만듭니다 (사용자는 신경 쓸 필요 없음)
+            ws = doc.add_worksheet(title="settings", rows=2, cols=2)
+            ws.update(range_name="A1:B1", values=[["free", str(time.time())]])
 
-def is_collecting_now():
-    """누군가 수집 중인지 확인하는 함수 (좀비 자물쇠 방지 포함)"""
-    if os.path.exists(LOCK_FILE):
-        # 만약 에러로 인해 자물쇠가 안 풀리고 15분(900초) 이상 방치되었다면 강제로 풉니다.
-        if time.time() - os.path.getmtime(LOCK_FILE) > 900:
-            os.remove(LOCK_FILE)
+        if action == "check":
+            status = ws.cell(1, 1).value
+            timestamp = ws.cell(1, 2).value
+            if status == "running":
+                # 로봇이 15분(900초) 이상 돌고 있다면 에러로 간주하고 자물쇠를 부숨
+                if time.time() - float(timestamp) > 900:
+                    ws.update(range_name="A1:B1", values=[["free", str(time.time())]])
+                    return False
+                return True
             return False
-        return True
-    return False
+            
+        elif action == "lock":
+            ws.update(range_name="A1:B1", values=[["running", str(time.time())]])
+            
+        elif action == "unlock":
+            ws.update(range_name="A1:B1", values=[["free", str(time.time())]])
+            
+    except Exception as e:
+        return False # 구글 서버 일시 오류 시 사용자를 막지 않고 통과시킴 (유연한 방어)
 
 # ==========================================
-# 구글 시트 연동 및 검토완료 처리 함수
+# ⚡ 초고속 데이터 캐싱 (API 차단 완벽 방어)
 # ==========================================
 if "GOOGLE_CREDENTIALS" in st.secrets:
     with open("google_key.json", "w", encoding="utf-8") as f:
         f.write(st.secrets["GOOGLE_CREDENTIALS"])
 
+# 데이터를 10분 동안 메모리에 기억해서 구글 서버 부하를 0으로 만듭니다.
+@st.cache_data(ttl=600)
 def get_google_sheet(sheet_name):
     try:
         gc = gspread.service_account(filename="google_key.json")
@@ -142,10 +165,8 @@ if menu == "공고 자동수집":
         "극한 탐색(최대 60초 대기/셀레니움)"
     ])
 
-    # 🌟 수집 버튼 클릭 시 자물쇠 방어 시스템 작동!
     if st.button("공고 수집", type="primary"):
-        if is_collecting_now():
-            # 누군가 이미 실행 중이라면 경고창을 띄우고 실행을 차단합니다.
+        if manage_sheet_lock("check"):
             st.warning("⏳ 현재 다른 팀원이 공고를 수집하고 있습니다. 서버 보호를 위해 잠시 후 새로고침(F5)을 눌러주세요!")
         else:
             if "빠른 탐색" in engine_choice:
@@ -157,9 +178,7 @@ if menu == "공고 자동수집":
                 
             with st.status(f"🚀 [{target_script}] 로봇 출동! 데이터를 수집 중입니다...", expanded=True) as status:
                 try:
-                    # 🔒 수집 시작 시 자물쇠 생성
-                    with open(LOCK_FILE, "w") as f:
-                        f.write("running")
+                    manage_sheet_lock("lock") # 시트에 철통 자물쇠 채움
                         
                     process = subprocess.Popen(
                         [sys.executable, "-u", target_script, str(collect_days), collect_keywords],
@@ -171,14 +190,13 @@ if menu == "공고 자동수집":
 
                     if process.returncode == 0:
                         status.update(label="✅ 공고 수집 완료!", state="complete", expanded=False)
+                        get_google_sheet.clear() # 🌟 수집 완료 후 최신 데이터를 보기 위해 기억(캐시) 초기화
                     else:
                         status.update(label="❌ 수집 실패", state="error", expanded=True)
                 except Exception as e:
                     status.update(label="❌ 시스템 오류", state="error", expanded=True)
                 finally:
-                    # 🔓 수집이 끝났거나 오류가 나도 무조건 자물쇠를 풉니다!
-                    if os.path.exists(LOCK_FILE):
-                        os.remove(LOCK_FILE)
+                    manage_sheet_lock("unlock") # 에러가 나도 자물쇠는 무조건 풂
                         
             st.rerun()
 
@@ -222,6 +240,7 @@ if menu == "공고 자동수집":
                 if keys_to_mark:
                     with st.spinner("구글 시트에 검토 내역을 반영 중입니다..."):
                         mark_as_reviewed(keys_to_mark)
+                        get_google_sheet.clear() # 🌟 검토 내역을 즉시 화면에 반영하기 위해 기억(캐시) 초기화
                     st.success("검토 완료 처리가 구글 시트에 반영되었습니다!")
                     st.rerun()
                 else:
