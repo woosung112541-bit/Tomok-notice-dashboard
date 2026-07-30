@@ -39,6 +39,8 @@ if not check_password():
     st.stop()
 
 # ==========================================
+# 구글 시트 연동 및 검토완료 처리 함수
+# ==========================================
 if "GOOGLE_CREDENTIALS" in st.secrets:
     with open("google_key.json", "w", encoding="utf-8") as f:
         f.write(st.secrets["GOOGLE_CREDENTIALS"])
@@ -52,6 +54,43 @@ def get_google_sheet(sheet_name):
         return pd.DataFrame(data)
     except Exception as e:
         return pd.DataFrame()
+
+def mark_as_reviewed(notice_keys_to_mark):
+    """현재 필터링된 공고들을 구글 시트에서 '완료'로 일괄 변경하는 함수"""
+    gc = gspread.service_account(filename="google_key.json")
+    doc = gc.open("맞춤공고_DB")
+    worksheet = doc.worksheet("notices")
+    all_records = worksheet.get_all_values()
+    
+    if not all_records: return
+    
+    headers = all_records[0]
+    # 기존 시트에 '검토유무' 열이 없다면 맨 끝에 추가 (호환성 유지)
+    if "검토유무" not in headers:
+        headers.append("검토유무")
+        worksheet.update(range_name="1:1", values=[headers])
+        review_col_idx = len(headers) - 1
+    else:
+        review_col_idx = headers.index("검토유무")
+        
+    key_col_idx = headers.index("notice_key")
+    
+    cells_to_update = []
+    for row_idx, row in enumerate(all_records):
+        if row_idx == 0: continue
+        
+        # 이전 데이터로 인해 열 길이가 짧은 경우 빈칸으로 채움
+        if len(row) <= review_col_idx:
+            row.extend([""] * (review_col_idx - len(row) + 1))
+        
+        if row[key_col_idx] in notice_keys_to_mark:
+            # gspread는 1-index 기반이므로 row_idx+1, col_idx+1
+            cell = gspread.Cell(row=row_idx+1, col=review_col_idx+1, value="완료")
+            cells_to_update.append(cell)
+            
+    # 한 번의 API 호출로 셀들을 일괄 업데이트 (속도 최적화)
+    if cells_to_update:
+        worksheet.update_cells(cells_to_update)
 
 # ==========================================
 # 사이드바 메뉴 설정
@@ -68,7 +107,6 @@ menu = st.sidebar.radio(
 )
 st.sidebar.divider()
 
-# 하이퍼링크 버튼
 st.sidebar.subheader("🔗 주요 사이트 바로가기")
 st.sidebar.link_button("🏛️ 한국시설안전협회", "http://www.assi.or.kr/sub/board/gongji.asp?boardname=gongji")
 st.sidebar.link_button("📑 조달청 통합명부", "https://www.pps.go.kr/kor/bbs/list.do?key=00641")
@@ -87,7 +125,6 @@ if menu == "공고 자동수집":
     with col2: 
         collect_keywords = st.text_input("🔑 수집 키워드 (쉼표 구분)", value="안전, 모집, 지정, 공고, 용역")
 
-    # 🌟 3가지 엔진 모드 선택!
     engine_choice = st.radio("⚙️ 수집 엔진 선택", [
         "빠른 탐색(열람가능 사이트)", 
         "정밀 탐색(셀레니움)",
@@ -95,7 +132,6 @@ if menu == "공고 자동수집":
     ])
 
     if st.button("공고 수집", type="primary"):
-        # 선택한 버튼에 따라 실행할 파일 매칭
         if "빠른 탐색" in engine_choice:
             target_script = "main_pure.py"
         elif "정밀 탐색" in engine_choice:
@@ -125,23 +161,66 @@ if menu == "공고 자동수집":
 
     df = get_google_sheet("notices")
     if not df.empty and '공고제목' in df.columns:
+        # 기존 시트에 검토유무 열이 없을 경우 기본값으로 채워줌
+        if '검토유무' not in df.columns:
+            df['검토유무'] = '미검토'
+            
         st.sidebar.subheader("🔍 공고 실시간 검색")
-        search_keyword = st.sidebar.text_input("공고제목 / 키워드 검색", "")
+        search_keyword = st.sidebar.text_input("공고제목 / 특이사항 검색", "")
         search_org = st.sidebar.text_input("발주기관(출처) 검색", "")
         date_range = st.sidebar.date_input("등록일자 범위 지정", [])
+        
+        # 검토 완료된 항목 숨기기 필터 추가
+        hide_reviewed = st.sidebar.checkbox("✅ 검토 완료된 공고 숨기기", value=False)
 
         filtered_df = df.copy()
-        if search_keyword: filtered_df = filtered_df[filtered_df['공고제목'].astype(str).str.contains(search_keyword, case=False, na=False)]
-        if search_org: filtered_df = filtered_df[filtered_df['출처'].astype(str).str.contains(search_org, case=False, na=False)]
+        
+        # 조건부 필터링 적용
+        if hide_reviewed:
+            filtered_df = filtered_df[filtered_df['검토유무'] != '완료']
+            
+        if search_keyword: 
+            # 공고제목이나 특이사항(🔴빨강, 🔵파랑 태그 등)으로 텍스트 필터링
+            filtered_df = filtered_df[
+                filtered_df['공고제목'].astype(str).str.contains(search_keyword, case=False, na=False) |
+                filtered_df['특이사항'].astype(str).str.contains(search_keyword, case=False, na=False)
+            ]
+        if search_org: 
+            filtered_df = filtered_df[filtered_df['출처'].astype(str).str.contains(search_org, case=False, na=False)]
         if len(date_range) == 2:
             start_date, end_date = date_range[0], date_range[1]
             parsed_dates = pd.to_datetime(filtered_df['등록일'].astype(str).str.replace('.', '-'), errors='coerce').dt.date
             filtered_df = filtered_df[(parsed_dates >= start_date) & (parsed_dates <= end_date)]
 
         st.subheader(f"📋 누적 공고 (검색 결과: {len(filtered_df)}건 / 전체: {len(df)}건)")
-        display_columns = ['출처', '등록일', '공고제목', '특이사항', '상세링크']
+        
+        # 검토 완료 일괄 처리 버튼
+        col_btn1, col_btn2 = st.columns([3, 1])
+        with col_btn2:
+            if st.button("✅ 현재 화면의 공고 모두 '검토완료' 처리", use_container_width=True):
+                keys_to_mark = filtered_df['notice_key'].tolist()
+                if keys_to_mark:
+                    with st.spinner("구글 시트에 검토 내역을 반영 중입니다..."):
+                        mark_as_reviewed(keys_to_mark)
+                    st.success("검토 완료 처리가 구글 시트에 반영되었습니다!")
+                    st.rerun()
+                else:
+                    st.warning("처리할 공고가 없습니다.")
+        
+        # 검토유무를 맨 우측에 배치
+        display_columns = ['출처', '등록일', '공고제목', '특이사항', '상세링크', '검토유무']
         display_df = filtered_df[[c for c in display_columns if c in filtered_df.columns]]
-        st.dataframe(display_df, column_config={"상세링크": st.column_config.LinkColumn("상세링크")}, use_container_width=True)
+        
+        # 데이터프레임 스타일링 (검토 완료된 행은 회색 처리)
+        def highlight_reviewed(row):
+            if row.get('검토유무') == '완료':
+                # 검토 완료된 행은 회색 바탕에 글씨를 흐리게 처리
+                return ['background-color: #f0f2f6; color: #a0aab2;'] * len(row)
+            return [''] * len(row)
+            
+        styled_df = display_df.style.apply(highlight_reviewed, axis=1)
+        
+        st.dataframe(styled_df, column_config={"상세링크": st.column_config.LinkColumn("상세링크")}, use_container_width=True)
     else:
         st.info("아직 구글 시트에 수집된 데이터가 없거나, 시트가 비어있습니다.")
 
@@ -187,13 +266,13 @@ elif menu == "공고 통계 및 분석":
         with top_col2:
             st.subheader("🔥 주요 특이사항 발생 빈도")
             if '특이사항' in df.columns:
-                # 🌟 소방 제거 포함
                 ignore_words = ['-', 'nan', 'none', '', '없음', '소방']
                 valid_specials = df['특이사항'].astype(str).str.strip()
                 special_df = df[~valid_specials.str.lower().isin(ignore_words)]
                 
                 if not special_df.empty:
-                    specials_list = special_df['특이사항'].astype(str).str.replace('🔥', '').str.split(',')
+                    # 🔴, 🔵 아이콘을 제거하고 순수 글자 빈도만 통계로 잡습니다.
+                    specials_list = special_df['특이사항'].astype(str).str.replace('🔥', '').str.replace('🔴', '').str.replace('🔵', '').str.split(',')
                     all_specials = [item.strip() for sublist in specials_list if isinstance(sublist, list) for item in sublist if item.strip() and item.strip().lower() not in ignore_words]
                     if all_specials: 
                         st.bar_chart(pd.Series(all_specials).value_counts().head(10))
@@ -259,19 +338,15 @@ elif menu == "공고수집성공기관":
         else:
             first_col_name = df_orgs.columns[0]
             org_list = df_orgs[first_col_name].dropna().astype(str).unique().tolist()
-            
             clean_org_list = [org.strip() for org in org_list if org.strip() and org.lower() != 'nan']
             
             if clean_org_list:
                 st.success(f"🎉 총 {len(clean_org_list)}개 기관에서 성공적으로 공고를 수집했습니다!")
-                
                 display_df = pd.DataFrame({"✅ 수집 완료 기관 명단": clean_org_list})
                 display_df.index += 1
-                
                 st.dataframe(display_df, use_container_width=True)
             else:
                 st.info("수집에 성공한 기관 목록 데이터가 없습니다.")
-                
     except Exception as e:
         st.error(f"데이터를 불러오는 중 예상치 못한 오류가 발생했습니다.\n(상세 원인: {e})")
 
