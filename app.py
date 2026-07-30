@@ -87,10 +87,21 @@ if menu == "공고 자동수집":
     with col2: 
         collect_keywords = st.text_input("🔑 수집 키워드 (쉼표 구분)", value="안전, 모집, 지정, 공고, 용역")
 
-    engine_choice = st.radio("⚙️ 수집 엔진 선택", ["빠른 탐색(열람가능 사이트)", "정밀 탐색(셀레니움)"])
+engine_choice = st.radio("⚙️ 수집 엔진 선택", [
+        "빠른 탐색(열람가능 사이트)", 
+        "정밀 탐색(셀레니움)",
+        "극한 탐색(최대 60초 대기/셀레니움)"
+    ])
 
     if st.button("공고 수집", type="primary"):
-        target_script = "main_pure.py" if "빠른 탐색" in engine_choice else "main.py"
+        # 선택한 버튼에 따라 실행할 파일을 결정하는 로직
+        if "빠른 탐색" in engine_choice:
+            target_script = "main_pure.py"
+        elif "정밀 탐색" in engine_choice:
+            target_script = "main.py"
+        else:
+            target_script = "main_max.py"
+            
         with st.status(f"🚀 [{target_script}] 로봇 출동! 데이터를 수집 중입니다...", expanded=True) as status:
             try:
                 process = subprocess.Popen(
