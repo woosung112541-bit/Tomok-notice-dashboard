@@ -13,14 +13,15 @@ import gspread
 import io
 import olefile
 from pypdf import PdfReader
+import logging
 
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ==========================================
 G2B_API_KEY = "9f7b495399ad64ec35b86f54a0a933fdf368b264bed9bcbf4e9b11556b6c9ff9"
 # ==========================================
 
-# 🌟 0입력 시 당일 수집 완벽 대응 로직
 if len(sys.argv) >= 3:
     DAYS_AGO = int(sys.argv[1])
     TARGET_KEYWORDS = [word.strip() for word in sys.argv[2].split(',')]
@@ -29,7 +30,6 @@ else:
     TARGET_KEYWORDS = ["안전", "모집", "지정", "공고", "용역"]
 
 if DAYS_AGO == 0:
-    # 0일 입력 시 '오늘 자정(00:00:00)'을 기준으로 잡아 당일 공고를 놓치지 않음
     target_date_limit = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 else:
     target_date_limit = datetime.now() - timedelta(days=DAYS_AGO)
@@ -42,8 +42,9 @@ ORG_NAME_COL_INDEX = 2
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INPUT_EXCEL = os.path.join(BASE_DIR, '등록명부 정리시트.xlsx')
 
-# 🌟 [특이사항 및 스마트 지역 분석 키워드 설정]
-SPECIAL_KWS = ["안전진단", "종합", "건설", "토목", "교량", "제한경쟁", "면허", "자격"]
+# 🌟 토목/건축 완벽 분리 스마트 키워드 
+PLUS_KWS = ["종합", "토목", "안전점검", "수행기관", "대전"]
+MINUS_KWS = ["건축분야", "신축", "번지", "증축", "수의", "건립"]
 REGION_KWS = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주']
 REGION_HINT_KWS = ['지역제한', '소재지', '영업소', '한정', '관내', '소재한', '위치한']
 
@@ -56,7 +57,8 @@ try:
     ws_empty = doc.worksheet("empty_orgs")
     
     if not ws_notices.get_all_values():
-        ws_notices.append_row(["출처", "등록일", "공고제목", "상세링크", "notice_key", "created_at", "특이사항"])
+        # 검토유무 열 추가
+        ws_notices.append_row(["출처", "등록일", "공고제목", "상세링크", "notice_key", "created_at", "특이사항", "검토유무"])
     if not ws_collected.get_all_values():
         ws_collected.append_row(["org_name"])
         
@@ -94,7 +96,6 @@ def discover_additional_boards(base_url, domain):
     except: pass
     return list(discovered_urls)[:3] 
 
-# 🌟 첨부파일을 능동적으로 열어보고 지역제한을 추리하는 스마트 딥스캔!
 def deep_scan_notice(url):
     found_specials = set()
     found_regions = set()
@@ -106,10 +107,8 @@ def deep_scan_notice(url):
         res.encoding = 'utf-8'
         soup = BeautifulSoup(res.text, 'html.parser')
         
-        # 1. 게시판 본문 내용 확보
         full_text += soup.get_text()
         
-        # 2. 첨부파일(PDF, HWP) 다운받아서 열어보고 글자 확보
         for a in soup.find_all('a', href=True):
             href = a['href'].lower()
             if href.endswith('.pdf') or href.endswith('.hwp'):
@@ -120,7 +119,7 @@ def deep_scan_notice(url):
                         content = f_res.content
                         if href.endswith('.pdf'):
                             reader = PdfReader(io.BytesIO(content))
-                            for page in reader.pages[:3]: # 보통 자격요건은 앞부분에 있음
+                            for page in reader.pages[:3]: 
                                 full_text += " " + page.extract_text()
                         elif href.endswith('.hwp'):
                             f = olefile.OleFileIO(io.BytesIO(content))
@@ -129,9 +128,12 @@ def deep_scan_notice(url):
                                 full_text += " " + prv
                 except: pass
                 
-        # --- 🤖 능동 분석 시작 ---
-        for kw in SPECIAL_KWS:
-            if kw in full_text: found_specials.add(kw)
+        # --- 🤖 능동 분석 시작 (빨강/파랑 구분) ---
+        for kw in PLUS_KWS:
+            if kw in full_text: found_specials.add(f"🔴{kw}")
+            
+        for kw in MINUS_KWS:
+            if kw in full_text: found_specials.add(f"🔵{kw}")
             
         is_region_restricted = any(hint in full_text for hint in REGION_HINT_KWS)
         
@@ -236,7 +238,6 @@ try:
 except:
     all_sites = EXTRA_SITES
 
-# 건강 진단 탑재!
 def process_site(site):
     base_url, org_name = site['url'], site['org_name']
     domain = get_domain(base_url)
@@ -296,9 +297,10 @@ new_rows = []
 for item in all_notices:
     notice_key = f"{item['출처']}|||{item['공고제목']}"
     if notice_key not in history_keys:
+        # 검토유무 열에 "미검토" 기본값 추가하여 기록
         new_rows.append([
             item['출처'], item['등록일'], item['공고제목'], item['상세링크'], 
-            notice_key, current_time, item.get('특이사항', '-')
+            notice_key, current_time, item.get('특이사항', '-'), "미검토"
         ])
         history_keys.add(notice_key)
 
