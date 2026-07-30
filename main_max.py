@@ -350,7 +350,7 @@ def process_site(site):
 
 all_notices, empty_sites = [], []
 
-print("[시작] 정밀탐색(딥스캔+셀레니움) 가동")
+print("[시작] 초정밀탐색(딥스캔+셀레니움+각60초대기) 가동")
 with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
     future_to_site = {executor.submit(process_site, site): site for site in all_sites}
     for i, future in enumerate(concurrent.futures.as_completed(future_to_site), 1):
