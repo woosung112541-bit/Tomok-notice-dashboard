@@ -18,9 +18,7 @@ import logging
 logging.getLogger("pypdf").setLevel(logging.ERROR)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ==========================================
 G2B_API_KEY = "9f7b495399ad64ec35b86f54a0a933fdf368b264bed9bcbf4e9b11556b6c9ff9"
-# ==========================================
 
 if len(sys.argv) >= 3:
     DAYS_AGO = int(sys.argv[1])
@@ -36,19 +34,18 @@ else:
 
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-BOARD_MENU_KEYWORDS = ["공지", "알림", "고시", "소식", "입찰", "발주", "게시판"] 
+# 🌟 고시, 공고, 새소식 우선 순위 추가
+BOARD_MENU_KEYWORDS = ["고시공고", "고시", "공고", "입찰", "발주", "새소식", "공지", "알림", "소식", "게시판"]
 ORG_NAME_COL_INDEX = 2 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INPUT_EXCEL = os.path.join(BASE_DIR, '등록명부 정리시트.xlsx')
 
-# 🌟 토목/건축 완벽 분리 스마트 키워드 
 PLUS_KWS = ["종합", "토목", "안전점검", "수행기관", "대전"]
 MINUS_KWS = ["건축분야", "신축", "번지", "증축", "수의", "건립"]
 REGION_KWS = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주']
 REGION_HINT_KWS = ['지역제한', '소재지', '영업소', '한정', '관내', '소재한', '위치한']
 
-# ==========================================
 try:
     gc = gspread.service_account(filename="google_key.json")
     doc = gc.open("맞춤공고_DB")
@@ -57,7 +54,6 @@ try:
     ws_empty = doc.worksheet("empty_orgs")
     
     if not ws_notices.get_all_values():
-        # 검토유무 열 추가
         ws_notices.append_row(["출처", "등록일", "공고제목", "상세링크", "notice_key", "created_at", "특이사항", "검토유무"])
     if not ws_collected.get_all_values():
         ws_collected.append_row(["org_name"])
@@ -84,17 +80,20 @@ def discover_additional_boards(base_url, domain):
     headers = {'User-Agent': 'Mozilla/5.0'}
     discovered_urls = set()
     try:
-        response = requests.get(base_url, headers=headers, verify=False, timeout=(5, 10))
+        response = requests.get(base_url, headers=headers, verify=False, timeout=(10, 15))
         soup = BeautifulSoup(response.text, 'html.parser')
         for a_tag in soup.find_all('a', href=True):
-            text = a_tag.get_text(strip=True)
+            text = a_tag.get_text(strip=True).replace(" ", "")
             href = a_tag['href']
             if any(keyword in text for keyword in BOARD_MENU_KEYWORDS):
                 if "javascript:" in href.lower() or href == "#": continue
                 full_url = urllib.parse.urljoin(base_url, href)
                 if domain in full_url: discovered_urls.add(full_url)
     except: pass
-    return list(discovered_urls)[:3] 
+    
+    # 🌟 공지사항보다 고시/공고를 우선 탐색하도록 정렬 후 최대 5개 반환
+    sorted_urls = sorted(list(discovered_urls), key=lambda x: ('gosi' in x.lower() or 'noti' in x.lower() or 'bid' in x.lower()), reverse=True)
+    return sorted_urls[:5] 
 
 def deep_scan_notice(url):
     found_specials = set()
@@ -128,7 +127,6 @@ def deep_scan_notice(url):
                                 full_text += " " + prv
                 except: pass
                 
-        # --- 🤖 능동 분석 시작 (빨강/파랑 구분) ---
         for kw in PLUS_KWS:
             if kw in full_text: found_specials.add(f"🔴{kw}")
             
@@ -136,17 +134,14 @@ def deep_scan_notice(url):
             if kw in full_text: found_specials.add(f"🔵{kw}")
             
         is_region_restricted = any(hint in full_text for hint in REGION_HINT_KWS)
-        
         if is_region_restricted:
             for r in REGION_KWS:
                 if r in full_text:
                     found_regions.add(r)
-            
             if found_regions:
                 found_specials.add(f"지역제한({','.join(list(found_regions))})")
             else:
                 found_specials.add("지역제한(상세확인)")
-                
     except: pass
     
     return "🔥 " + ", ".join(list(found_specials)) if found_specials else "-"
@@ -156,7 +151,7 @@ def smart_scrape_board(url, domain, org_name):
     results = []
     rows_found_count = 0
     try:
-        response = requests.get(url, headers=headers, verify=False, timeout=(5, 10))
+        response = requests.get(url, headers=headers, verify=False, timeout=(10, 15))
         soup = BeautifulSoup(response.text, 'html.parser')
         rows = []
         for selector in COMMON_ROW_SELECTORS:
@@ -168,21 +163,30 @@ def smart_scrape_board(url, domain, org_name):
         for row in rows:
             title_tag = row.find('a')
             if title_tag:
-                title = title_tag.get_text(strip=True)
+                # 🌟 아산시 공고명 번호 추출 오류 완벽 해결 (모든 텍스트 합치기)
+                title = " ".join(title_tag.stripped_strings)
+                if not title: title = title_tag.get_text(strip=True)
+                
                 href = title_tag.get('href', '').strip()
                 link = url if "javascript:" in href.lower() or href == "#" else urllib.parse.urljoin(url, href)
                     
-                date_str, post_date = "", None
+                found_dates = []
                 for text in row.stripped_strings:
-                    match = re.search(r'(20\d{2}|\d{2})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})', text)
-                    if match:
+                    matches = re.finditer(r'(20\d{2}|\d{2})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})', text)
+                    for match in matches:
                         y, m, d = match.groups()
                         if len(y) == 2: y = "20" + y 
                         try:
-                            post_date = datetime(int(y), int(m), int(d))
-                            date_str = post_date.strftime("%Y.%m.%d")
-                            break
+                            pd_date = datetime(int(y), int(m), int(d))
+                            found_dates.append(pd_date)
                         except: pass
+                        
+                # 🌟 날짜 오작동 (가스공사, LH) 방지 -> 가장 먼저 표기된(과거의) 날짜 우선 인식
+                post_date = None
+                date_str = ""
+                if found_dates:
+                    post_date = min(found_dates)
+                    date_str = post_date.strftime("%Y.%m.%d")
                         
                 if post_date and post_date >= target_date_limit:
                     if any(keyword in title for keyword in TARGET_KEYWORDS):
@@ -241,7 +245,6 @@ except:
 def process_site(site):
     base_url, org_name = site['url'], site['org_name']
     domain = get_domain(base_url)
-    
     health_status = "공고 없음"
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -297,7 +300,6 @@ new_rows = []
 for item in all_notices:
     notice_key = f"{item['출처']}|||{item['공고제목']}"
     if notice_key not in history_keys:
-        # 검토유무 열에 "미검토" 기본값 추가하여 기록
         new_rows.append([
             item['출처'], item['등록일'], item['공고제목'], item['상세링크'], 
             notice_key, current_time, item.get('특이사항', '-'), "미검토"
