@@ -7,7 +7,7 @@ import gspread
 import plotly.express as px
 import time
 
-# 화면 기본 설정이 무조건 가장 먼저 와야 합니다!
+# 화면 기본 설정
 st.set_page_config(page_title="맞춤 공고 수집 대시보드", layout="wide")
 
 # ==========================================
@@ -40,10 +40,9 @@ if not check_password():
     st.stop()
 
 # ==========================================
-# 🛑 영구 불멸의 '구글 시트' 자물쇠 시스템 (클라우드 리부팅 완벽 방어)
+# 🛑 영구 불멸의 '구글 시트' 자물쇠 시스템
 # ==========================================
 def manage_sheet_lock(action="check"):
-    """구글 시트의 'settings' 탭을 이용해 동시 접속을 차단하는 함수"""
     try:
         gc = gspread.service_account(filename="google_key.json")
         doc = gc.open("맞춤공고_DB")
@@ -51,7 +50,6 @@ def manage_sheet_lock(action="check"):
         try:
             ws = doc.worksheet("settings")
         except gspread.exceptions.WorksheetNotFound:
-            # 설정 탭이 없으면 알아서 새로 만듭니다 (사용자는 신경 쓸 필요 없음)
             ws = doc.add_worksheet(title="settings", rows=2, cols=2)
             ws.update(range_name="A1:B1", values=[["free", str(time.time())]])
 
@@ -59,7 +57,6 @@ def manage_sheet_lock(action="check"):
             status = ws.cell(1, 1).value
             timestamp = ws.cell(1, 2).value
             if status == "running":
-                # 로봇이 15분(900초) 이상 돌고 있다면 에러로 간주하고 자물쇠를 부숨
                 if time.time() - float(timestamp) > 900:
                     ws.update(range_name="A1:B1", values=[["free", str(time.time())]])
                     return False
@@ -73,16 +70,15 @@ def manage_sheet_lock(action="check"):
             ws.update(range_name="A1:B1", values=[["free", str(time.time())]])
             
     except Exception as e:
-        return False # 구글 서버 일시 오류 시 사용자를 막지 않고 통과시킴 (유연한 방어)
+        return False
 
 # ==========================================
-# ⚡ 초고속 데이터 캐싱 (API 차단 완벽 방어)
+# ⚡ 데이터 통신
 # ==========================================
 if "GOOGLE_CREDENTIALS" in st.secrets:
     with open("google_key.json", "w", encoding="utf-8") as f:
         f.write(st.secrets["GOOGLE_CREDENTIALS"])
 
-# 데이터를 10분 동안 메모리에 기억해서 구글 서버 부하를 0으로 만듭니다.
 @st.cache_data(ttl=600)
 def get_google_sheet(sheet_name):
     try:
@@ -178,7 +174,7 @@ if menu == "공고 자동수집":
                 
             with st.status(f"🚀 [{target_script}] 로봇 출동! 데이터를 수집 중입니다...", expanded=True) as status:
                 try:
-                    manage_sheet_lock("lock") # 시트에 철통 자물쇠 채움
+                    manage_sheet_lock("lock")
                         
                     process = subprocess.Popen(
                         [sys.executable, "-u", target_script, str(collect_days), collect_keywords],
@@ -190,13 +186,13 @@ if menu == "공고 자동수집":
 
                     if process.returncode == 0:
                         status.update(label="✅ 공고 수집 완료!", state="complete", expanded=False)
-                        get_google_sheet.clear() # 🌟 수집 완료 후 최신 데이터를 보기 위해 기억(캐시) 초기화
+                        get_google_sheet.clear() 
                     else:
                         status.update(label="❌ 수집 실패", state="error", expanded=True)
                 except Exception as e:
                     status.update(label="❌ 시스템 오류", state="error", expanded=True)
                 finally:
-                    manage_sheet_lock("unlock") # 에러가 나도 자물쇠는 무조건 풂
+                    manage_sheet_lock("unlock")
                         
             st.rerun()
 
@@ -240,7 +236,7 @@ if menu == "공고 자동수집":
                 if keys_to_mark:
                     with st.spinner("구글 시트에 검토 내역을 반영 중입니다..."):
                         mark_as_reviewed(keys_to_mark)
-                        get_google_sheet.clear() # 🌟 검토 내역을 즉시 화면에 반영하기 위해 기억(캐시) 초기화
+                        get_google_sheet.clear() 
                     st.success("검토 완료 처리가 구글 시트에 반영되었습니다!")
                     st.rerun()
                 else:
@@ -249,12 +245,19 @@ if menu == "공고 자동수집":
         display_columns = ['출처', '등록일', '공고제목', '특이사항', '상세링크', '검토유무']
         display_df = filtered_df[[c for c in display_columns if c in filtered_df.columns]]
         
-        def highlight_reviewed(row):
+        # 🌟 하이라이트 로직 완벽 적용 (회색 1순위, 안전점검 녹색 2순위)
+        def highlight_row(row):
             if row.get('검토유무') == '완료':
                 return ['background-color: #f0f2f6; color: #a0aab2;'] * len(row)
+            
+            title_text = str(row.get('공고제목', ''))
+            special_text = str(row.get('특이사항', ''))
+            if '안전점검' in title_text or '안전점검' in special_text:
+                return ['background-color: #e6ffe6; color: #006600; font-weight: bold;'] * len(row)
+                
             return [''] * len(row)
             
-        styled_df = display_df.style.apply(highlight_reviewed, axis=1)
+        styled_df = display_df.style.apply(highlight_row, axis=1)
         
         st.dataframe(styled_df, column_config={"상세링크": st.column_config.LinkColumn("상세링크")}, use_container_width=True)
     else:
