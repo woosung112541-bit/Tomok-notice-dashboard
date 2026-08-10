@@ -14,9 +14,11 @@ import io
 import olefile
 from pypdf import PdfReader
 import logging
+import warnings
 
 logging.getLogger("pypdf").setLevel(logging.ERROR)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+warnings.filterwarnings("ignore", module='bs4')
 
 G2B_API_KEY = "9f7b495399ad64ec35b86f54a0a933fdf368b264bed9bcbf4e9b11556b6c9ff9"
 
@@ -27,14 +29,10 @@ else:
     DAYS_AGO = 15
     TARGET_KEYWORDS = ["안전", "모집", "지정", "공고", "용역"]
 
-if DAYS_AGO == 0:
-    target_date_limit = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-else:
-    target_date_limit = datetime.now() - timedelta(days=DAYS_AGO)
-
+if DAYS_AGO == 0: target_date_limit = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+else: target_date_limit = datetime.now() - timedelta(days=DAYS_AGO)
 current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-# 🌟 고시, 공고, 새소식 우선 순위 추가
 BOARD_MENU_KEYWORDS = ["고시공고", "고시", "공고", "입찰", "발주", "새소식", "공지", "알림", "소식", "게시판"]
 ORG_NAME_COL_INDEX = 2 
 
@@ -46,6 +44,13 @@ MINUS_KWS = ["건축분야", "신축", "번지", "증축", "수의", "건립"]
 REGION_KWS = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주']
 REGION_HINT_KWS = ['지역제한', '소재지', '영업소', '한정', '관내', '소재한', '위치한']
 
+# 🌟 4대 주요 사이트 (나라장터는 API로 별도 처리)
+EXTRA_SITES = [
+    {'url': 'http://www.assi.or.kr/sub/board/gongji.asp?boardname=gongji', 'org_name': '한국시설안전협회'},
+    {'url': 'https://www.pps.go.kr/kor/bbs/list.do?key=00641', 'org_name': '조달청 통합명부'},
+    {'url': 'https://www.igunsul.net/', 'org_name': '아이건설넷'}
+]
+
 try:
     gc = gspread.service_account(filename="google_key.json")
     doc = gc.open("맞춤공고_DB")
@@ -53,17 +58,14 @@ try:
     ws_collected = doc.worksheet("collected_orgs")
     ws_empty = doc.worksheet("empty_orgs")
     
-    if not ws_notices.get_all_values():
-        ws_notices.append_row(["출처", "등록일", "공고제목", "상세링크", "notice_key", "created_at", "특이사항", "검토유무"])
-    if not ws_collected.get_all_values():
-        ws_collected.append_row(["org_name"])
+    if not ws_notices.get_all_values(): ws_notices.append_row(["출처", "등록일", "공고제목", "상세링크", "notice_key", "created_at", "특이사항", "검토유무"])
+    if not ws_collected.get_all_values(): ws_collected.append_row(["org_name"])
         
     existing_notices = ws_notices.get_all_records()
     history_keys = {str(row.get('notice_key', '')) for row in existing_notices}
     existing_collected = ws_collected.get_all_records()
     collected_orgs = {str(row.get('org_name', '')) for row in existing_collected if str(row.get('org_name', ''))}
 except Exception as e:
-    print(f"❌ 구글 시트 연결 실패: {e}")
     sys.exit(1)
 
 COMMON_ROW_SELECTORS = [
@@ -90,8 +92,6 @@ def discover_additional_boards(base_url, domain):
                 full_url = urllib.parse.urljoin(base_url, href)
                 if domain in full_url: discovered_urls.add(full_url)
     except: pass
-    
-    # 🌟 공지사항보다 고시/공고를 우선 탐색하도록 정렬 후 최대 5개 반환
     sorted_urls = sorted(list(discovered_urls), key=lambda x: ('gosi' in x.lower() or 'noti' in x.lower() or 'bid' in x.lower()), reverse=True)
     return sorted_urls[:5] 
 
@@ -99,15 +99,12 @@ def deep_scan_notice(url):
     found_specials = set()
     found_regions = set()
     full_text = ""
-    
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         res = requests.get(url, headers=headers, verify=False, timeout=7)
         res.encoding = 'utf-8'
         soup = BeautifulSoup(res.text, 'html.parser')
-        
         full_text += soup.get_text()
-        
         for a in soup.find_all('a', href=True):
             href = a['href'].lower()
             if href.endswith('.pdf') or href.endswith('.hwp'):
@@ -118,32 +115,24 @@ def deep_scan_notice(url):
                         content = f_res.content
                         if href.endswith('.pdf'):
                             reader = PdfReader(io.BytesIO(content))
-                            for page in reader.pages[:3]: 
-                                full_text += " " + page.extract_text()
+                            for page in reader.pages[:3]: full_text += " " + page.extract_text()
                         elif href.endswith('.hwp'):
                             f = olefile.OleFileIO(io.BytesIO(content))
                             if f.exists('PrvText'):
                                 prv = f.openstream('PrvText').read().decode('utf-16le', errors='ignore')
                                 full_text += " " + prv
                 except: pass
-                
         for kw in PLUS_KWS:
             if kw in full_text: found_specials.add(f"🔴{kw}")
-            
         for kw in MINUS_KWS:
             if kw in full_text: found_specials.add(f"🔵{kw}")
-            
         is_region_restricted = any(hint in full_text for hint in REGION_HINT_KWS)
         if is_region_restricted:
             for r in REGION_KWS:
-                if r in full_text:
-                    found_regions.add(r)
-            if found_regions:
-                found_specials.add(f"지역제한({','.join(list(found_regions))})")
-            else:
-                found_specials.add("지역제한(상세확인)")
+                if r in full_text: found_regions.add(r)
+            if found_regions: found_specials.add(f"지역제한({','.join(list(found_regions))})")
+            else: found_specials.add("지역제한(상세확인)")
     except: pass
-    
     return "🔥 " + ", ".join(list(found_specials)) if found_specials else "-"
 
 def smart_scrape_board(url, domain, org_name):
@@ -158,18 +147,14 @@ def smart_scrape_board(url, domain, org_name):
             found_rows = soup.select(selector)
             if len(found_rows) > 0:
                 rows = found_rows; break
-        
         rows_found_count = len(rows)
         for row in rows:
             title_tag = row.find('a')
             if title_tag:
-                # 🌟 아산시 공고명 번호 추출 오류 완벽 해결 (모든 텍스트 합치기)
                 title = " ".join(title_tag.stripped_strings)
                 if not title: title = title_tag.get_text(strip=True)
-                
                 href = title_tag.get('href', '').strip()
                 link = url if "javascript:" in href.lower() or href == "#" else urllib.parse.urljoin(url, href)
-                    
                 found_dates = []
                 for text in row.stripped_strings:
                     matches = re.finditer(r'(20\d{2}|\d{2})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})', text)
@@ -180,16 +165,13 @@ def smart_scrape_board(url, domain, org_name):
                             pd_date = datetime(int(y), int(m), int(d))
                             found_dates.append(pd_date)
                         except: pass
-                        
-                # 🌟 날짜 오작동 (가스공사, LH) 방지 -> 가장 먼저 표기된(과거의) 날짜 우선 인식
                 post_date = None
                 date_str = ""
                 if found_dates:
                     post_date = min(found_dates)
                     date_str = post_date.strftime("%Y.%m.%d")
-                        
                 if post_date and post_date >= target_date_limit:
-                    if any(keyword in title for keyword in TARGET_KEYWORDS):
+                    if not TARGET_KEYWORDS or any(keyword in title for keyword in TARGET_KEYWORDS):
                         special_notes = deep_scan_notice(link)
                         results.append({'출처': org_name, '등록일': date_str, '공고제목': title, '상세링크': link, '특이사항': special_notes})
     except: pass
@@ -208,24 +190,15 @@ def fetch_g2b_api(api_key, days_ago, keywords):
             items = res.json().get('response', {}).get('body', {}).get('items', [])
             for item in items:
                 title = item.get('bidNtceNm', '')
-                if any(kw in title for kw in keywords):
+                if not keywords or any(kw in title for kw in keywords):
                     region = item.get('prtcptPosblRgnNm', '')
                     quelfc = item.get('bidQuelfcCdNm', '')
                     special = []
                     if region: special.append(f"지역제한({region})")
                     if quelfc: special.append("자격제한(상세확인)")
-                    
-                    results.append({
-                        '출처': f"{item.get('dmdInsttNm', '조달청')} (나라장터)",
-                        '등록일': item.get('bidNtceDt', '')[:10].replace('-', '.'),
-                        '공고제목': title,
-                        '상세링크': item.get('bidNtceDtlUrl', ''),
-                        '특이사항': "🔥 " + ", ".join(special) if special else "-"
-                    })
+                    results.append({'출처': f"{item.get('dmdInsttNm', '조달청')} (나라장터)", '등록일': item.get('bidNtceDt', '')[:10].replace('-', '.'), '공고제목': title, '상세링크': item.get('bidNtceDtlUrl', ''), '특이사항': "🔥 " + ", ".join(special) if special else "-"})
     except: pass
     return results
-
-EXTRA_SITES = [{'url': 'http://www.assi.or.kr/index.asp', 'org_name': '대한산업안전협회(수동)'}]
 
 try:
     df_input = pd.read_excel(INPUT_EXCEL, sheet_name=0)
@@ -236,6 +209,21 @@ try:
         url_j, url_k = str(row.iloc[9]).strip(), str(row.iloc[10]).strip() 
         if url_j.startswith('http'): target_sites.append({'url': url_j, 'org_name': org_name})
         if url_k.startswith('http'): target_sites.append({'url': url_k, 'org_name': org_name})
+    
+    # 🌟 문제 기관 강제 직통 주소 오버라이드
+    URL_OVERRIDES = {
+        "대전교통공사": "https://www.djtc.kr/kor/board.do?menuIdx=361",
+        "서산시": "https://www.seosan.go.kr/www/contents.do?key=1258",
+        "대전광역시 서구": "https://www.seogu.go.kr/prog/saeolGosi/GOSI/kor/sub04_02_01/list.do",
+        "논산시": "https://www.nonsan.go.kr/kor/html/sub03/03010201.html",
+        "용인특례시": "https://www.yongin.go.kr/home/yiNw/yiNwStable/yiNwStable02/yiNwStable02_01.jsp",
+        "용인시": "https://www.yongin.go.kr/home/yiNw/yiNwStable/yiNwStable02/yiNwStable02_01.jsp"
+    }
+    for site in target_sites:
+        for k, v in URL_OVERRIDES.items():
+            if k == site['org_name'] or k in site['org_name']:
+                site['url'] = v
+
     target_sites.extend(EXTRA_SITES)
     unique_sites = {site['url']: site for site in target_sites}.values()
     all_sites = list(unique_sites)
@@ -249,34 +237,17 @@ def process_site(site):
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
         res = requests.get(base_url, headers=headers, verify=False, timeout=7)
-        if res.status_code == 404: 
-            health_status = "❌ 404 에러 (게시판 삭제 또는 개편 의심)"
-        elif res.status_code != 200: 
-            health_status = f"⚠️ 서버 에러 (상태코드: {res.status_code})"
-    except requests.exceptions.Timeout:
-        health_status = "⏳ 응답 지연 (서버 마비 의심)"
-    except requests.exceptions.ConnectionError:
-        health_status = "🔌 연결 실패 (주소 완전 변경 의심)"
-    except Exception:
-        health_status = "⚠️ 기타 접속 오류"
-
+        if res.status_code == 404: health_status = "❌ 404 에러"
+        elif res.status_code != 200: health_status = f"⚠️ 서버 에러 ({res.status_code})"
+    except: health_status = "🔌 연결 실패"
     urls_to_scrape = [base_url] + discover_additional_boards(base_url, domain)
     site_notices = []
-    
     for u in urls_to_scrape:
         data, _ = smart_scrape_board(u, domain, org_name)
         site_notices.extend(data)
-            
-    return {
-        'org_name': org_name, 
-        'base_url': base_url, 
-        'notices': site_notices, 
-        'found': len(site_notices) > 0,
-        'status': health_status
-    }
+    return {'org_name': org_name, 'base_url': base_url, 'notices': site_notices, 'found': len(site_notices) > 0, 'status': health_status}
 
 all_notices, empty_sites = [], []
-
 print("[시작] 빠른 탐색(딥스캔) 가동")
 with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
     future_to_site = {executor.submit(process_site, site): site for site in all_sites}
@@ -293,29 +264,18 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
 
 g2b_notices = fetch_g2b_api(G2B_API_KEY, DAYS_AGO, TARGET_KEYWORDS)
 if g2b_notices: all_notices.extend(g2b_notices)
-
 print("\n📝 [저장 중] 구글 시트에 기록합니다...")
-
 new_rows = []
 for item in all_notices:
     notice_key = f"{item['출처']}|||{item['공고제목']}"
     if notice_key not in history_keys:
-        new_rows.append([
-            item['출처'], item['등록일'], item['공고제목'], item['상세링크'], 
-            notice_key, current_time, item.get('특이사항', '-'), "미검토"
-        ])
+        new_rows.append([item['출처'], item['등록일'], item['공고제목'], item['상세링크'], notice_key, current_time, item.get('특이사항', '-'), "미검토"])
         history_keys.add(notice_key)
-
-if new_rows:
-    ws_notices.append_rows(new_rows)
-    print(f"-> 🟢 구글 시트에 신규 공고 {len(new_rows)}건 추가 완료!")
-
+if new_rows: ws_notices.append_rows(new_rows)
 new_orgs = [[org] for org in collected_orgs if org not in {str(row.get('org_name', '')) for row in existing_collected}]
 if new_orgs: ws_collected.append_rows(new_orgs)
-
 ws_empty.clear()
 ws_empty.append_row(['출처기관', '게시판_URL', '분류'])
 empty_rows = [[e['출처기관'], e['게시판_URL'], e['분류']] for e in empty_sites if e['출처기관'] not in collected_orgs]
 if empty_rows: ws_empty.append_rows(empty_rows)
-
 print("\n[종료] 빠른 탐색 수집 완료!")
