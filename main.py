@@ -2,7 +2,7 @@ import os
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import urllib.parse
 import urllib3
 import time
@@ -26,15 +26,17 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 warnings.filterwarnings("ignore", module='bs4')
 
 # ==========================================
-# 🌟 4단계 아이건설넷 전용 계정 설정 (선택 사항)
-# 여기에 아이디와 비밀번호를 적어두시면 로봇이 자동 로그인 후 수집합니다!
-# 예: IGUNSUL_ID = "myid123"
+# 🌟 4단계 아이건설넷 전용 계정 설정 
 # ==========================================
 IGUNSUL_ID = "cosco0831" 
 IGUNSUL_PW = "dlawltn@1023" 
 # ==========================================
 
 G2B_API_KEY = "9f7b495399ad64ec35b86f54a0a933fdf368b264bed9bcbf4e9b11556b6c9ff9"
+
+# 🌟 한국 표준시(KST) 기반으로 시간 강제 연산
+KST = timezone(timedelta(hours=9))
+now_kst = datetime.now(KST).replace(tzinfo=None)
 
 if len(sys.argv) >= 3:
     DAYS_AGO = int(sys.argv[1])
@@ -43,9 +45,9 @@ else:
     DAYS_AGO = 15
     TARGET_KEYWORDS = ["안전", "모집", "지정", "공고", "용역"]
 
-if DAYS_AGO == 0: target_date_limit = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-else: target_date_limit = datetime.now() - timedelta(days=DAYS_AGO)
-current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+if DAYS_AGO == 0: target_date_limit = now_kst.replace(hour=0, minute=0, second=0, microsecond=0)
+else: target_date_limit = now_kst - timedelta(days=DAYS_AGO)
+current_time = now_kst.strftime("%Y-%m-%d %H:%M:%S")
 
 BOARD_MENU_KEYWORDS = ["고시공고", "고시", "공고", "입찰", "발주", "새소식", "공지", "알림", "소식", "게시판"]
 ORG_NAME_COL_INDEX = 2 
@@ -192,7 +194,6 @@ def smart_scrape_board(url, domain, org_name):
     except: pass
     return results, rows_found_count
 
-# 🌟 셀레니움 드라이버를 스텔스 모드로 전격 교체 (아이건설넷 완벽 침투용)
 def get_chrome_driver():
     chrome_options = Options()
     chrome_options.add_argument("--headless") 
@@ -209,7 +210,6 @@ def get_chrome_driver():
     except:
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=chrome_options)
-    # 로봇 신분 세탁
     driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'})
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return driver
@@ -219,9 +219,8 @@ def smart_scrape_board_with_selenium(url, domain, org_name):
     driver = None
     try:
         driver = get_chrome_driver()
-        driver.set_page_load_timeout(30)
+        driver.set_page_load_timeout(60)
         
-        # 🌟 4단계 핵심: 아이건설넷 (스텔스 + 자동로그인 + 스크롤)
         if "igunsul.net" in url:
             if IGUNSUL_ID and IGUNSUL_PW:
                 try:
@@ -234,10 +233,9 @@ def smart_scrape_board_with_selenium(url, domain, org_name):
                 except: pass
             driver.get(url)
             time.sleep(5)
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);") # 스크롤 유도
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);") 
             time.sleep(2)
             
-        # 🌟 3단계 핵심: 조달청 통합명부 전용
         elif "pps.go.kr" in url:
             driver.get(url)
             time.sleep(4)
@@ -281,12 +279,11 @@ def smart_scrape_board_with_selenium(url, domain, org_name):
                             time.sleep(3)
                 except: pass
             return results
-        
+            
         else:
             driver.get(url)
             time.sleep(3) 
 
-        # 공통 처리 로직
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         rows = []
         for selector in COMMON_ROW_SELECTORS:
@@ -314,11 +311,9 @@ def smart_scrape_board_with_selenium(url, domain, org_name):
                         if len(y) == 2: y = "20" + y 
                         try: pd_date = datetime(int(y), int(m), int(d)); found_dates.append(pd_date)
                         except: pass
-                post_date = None
-                date_str = ""
-                if found_dates:
-                    post_date = min(found_dates)
-                    date_str = post_date.strftime("%Y.%m.%d")
+                post_date = min(found_dates) if found_dates else None
+                date_str = post_date.strftime("%Y.%m.%d") if post_date else ""
+                
                 if post_date and post_date >= target_date_limit:
                     if not TARGET_KEYWORDS or any(keyword in title for keyword in TARGET_KEYWORDS):
                         special_notes = deep_scan_notice(link)
@@ -330,10 +325,17 @@ def smart_scrape_board_with_selenium(url, domain, org_name):
 
 def fetch_g2b_api(api_key, days_ago, keywords):
     if not api_key: return []
-    end_dt = datetime.now().strftime("%Y%m%d2359")
-    start_dt = (datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d0000")
+    # 🌟 G2B API 시간도 KST 기반으로 조회
+    g2b_now_kst = datetime.now(timezone(timedelta(hours=9)))
+    end_dt = g2b_now_kst.strftime("%Y%m%d2359")
+    start_dt = (g2b_now_kst - timedelta(days=days_ago)).strftime("%Y%m%d0000")
     results = []
-    endpoints = ["getFcltyBidPblancListInfoServc", "getServcBidPblancListInfoServc", "getBidPblancListInfoServc"]
+    
+    endpoints = [
+        "getFcltyBidPblancListInfoServc", 
+        "getServcBidPblancListInfoServc", 
+        "getBidPblancListInfoServc"       
+    ]
     
     for endpoint in endpoints:
         url = f"http://apis.data.go.kr/1230000/BidPublicInfoService04/{endpoint}"
@@ -406,7 +408,7 @@ def process_site(site):
     health_status = "공고 없음"
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
-        res = requests.get(base_url, headers=headers, verify=False, timeout=7)
+        res = requests.get(base_url, headers=headers, verify=False, timeout=30)
         if res.status_code == 404: health_status = "❌ 404 에러"
         elif res.status_code != 200: health_status = f"⚠️ 서버 에러 ({res.status_code})"
     except: health_status = "🔌 연결 실패"
