@@ -29,7 +29,7 @@ warnings.filterwarnings("ignore", module='bs4')
 # 🌟 4단계 아이건설넷 전용 계정 설정 (선택 사항)
 # ==========================================
 IGUNSUL_ID = "cosco0831" 
-IGUNSUL_PW = "임지수@1023" 
+IGUNSUL_PW = "dlawltn@1023" 
 # ==========================================
 
 G2B_API_KEY = "9f7b495399ad64ec35b86f54a0a933fdf368b264bed9bcbf4e9b11556b6c9ff9"
