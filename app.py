@@ -38,7 +38,7 @@ if not check_password():
     st.stop()
 
 # ==========================================
-# 🛑 영구 불멸의 '구글 시트' 자물쇠 시스템 (락+로그 동시 처리 최적화)
+# 🛑 영구 불멸의 '구글 시트' 자물쇠 시스템
 # ==========================================
 def manage_sheet_lock(action="check", engine_name=""):
     try:
@@ -59,9 +59,7 @@ def manage_sheet_lock(action="check", engine_name=""):
                     return False
                 return True
             return False
-            
         elif action == "lock_and_log":
-            # 🌟 구글 API 에러 방지를 위해 자물쇠와 로그를 단 한 번의 통신으로 묶어서 기록합니다.
             ws.update(
                 range_name="A1:B2", 
                 values=[
@@ -69,14 +67,11 @@ def manage_sheet_lock(action="check", engine_name=""):
                     [engine_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
                 ]
             )
-            
         elif action == "unlock":
             ws.update(range_name="A1:B1", values=[["free", str(time.time())]])
-            
     except Exception as e:
         return False
 
-# 🌟 API 과부하 방지를 위한 로그 캐싱 (1분 동안 기억)
 @st.cache_data(ttl=60)
 def get_recent_log():
     try:
@@ -90,7 +85,7 @@ def get_recent_log():
         return "기록 없음", "-"
 
 # ==========================================
-# ⚡ 데이터 통신 및 상태 업데이트 함수 (에러 방어막 추가)
+# ⚡ 데이터 통신 및 상태 업데이트 함수
 # ==========================================
 if "GOOGLE_CREDENTIALS" in st.secrets:
     with open("google_key.json", "w", encoding="utf-8") as f:
@@ -145,7 +140,7 @@ def update_notice_status(notice_keys_to_mark, status_value):
         return False
 
 # ==========================================
-# 🎨 테이블 렌더링 헬퍼 함수 (배경색 고정 + 초기화 팝업 패치)
+# 🎨 테이블 렌더링 헬퍼 함수
 # ==========================================
 def render_notice_table(df, key_prefix):
     if df.empty:
@@ -169,7 +164,6 @@ def render_notice_table(df, key_prefix):
         return [''] * len(row)
         
     styled_df = display_df.style.apply(highlight_row, axis=1)
-    
     disabled_cols = [col for col in display_df.columns if col != '선택']
     
     edited_df = st.data_editor(
@@ -193,24 +187,21 @@ def render_notice_table(df, key_prefix):
             if selected_keys:
                 with st.spinner("구글 시트에 적용 중..."): 
                     if update_notice_status(selected_keys, "내업무맞음"):
-                        get_google_sheet.clear()
-                        st.rerun()
+                        get_google_sheet.clear(); st.rerun()
             else: st.warning("선택된 공고가 없습니다.")
     with c2:
         if st.button("⚫ 우리의 업무 아님 (진회색)", key=f"btn2_{key_prefix}", use_container_width=True):
             if selected_keys:
                 with st.spinner("구글 시트에 적용 중..."): 
                     if update_notice_status(selected_keys, "내업무아님"):
-                        get_google_sheet.clear()
-                        st.rerun()
+                        get_google_sheet.clear(); st.rerun()
             else: st.warning("선택된 공고가 없습니다.")
     with c3:
         if st.button("✅ 일반 검토 완료 (연회색)", key=f"btn3_{key_prefix}", use_container_width=True):
             if selected_keys:
                 with st.spinner("구글 시트에 적용 중..."): 
                     if update_notice_status(selected_keys, "완료"):
-                        get_google_sheet.clear()
-                        st.rerun()
+                        get_google_sheet.clear(); st.rerun()
             else: st.warning("선택된 공고가 없습니다.")
     with c4:
         if selected_keys:
@@ -219,8 +210,7 @@ def render_notice_table(df, key_prefix):
                 if st.button("네, 초기화 실행", key=f"reset_{key_prefix}", use_container_width=True):
                     with st.spinner("구글 시트에 적용 중..."): 
                         if update_notice_status(selected_keys, "미검토"):
-                            get_google_sheet.clear()
-                            st.rerun()
+                            get_google_sheet.clear(); st.rerun()
         else:
             if st.button("🔄 상태 초기화 (미검토)", key=f"btn4_{key_prefix}", use_container_width=True):
                 st.warning("선택된 공고가 없습니다.")
@@ -231,7 +221,7 @@ def render_notice_table(df, key_prefix):
 st.sidebar.title("📌 메뉴 선택")
 menu = st.sidebar.radio(
     "이동할 메뉴를 선택하세요:",
-    ["공고 자동수집", "공고 통계 및 분석", "공고수집성공기관", "사이트 검토 필요(오류/개편)", "📝 게시판 / 메모장"]
+    ["공고 자동수집", "공고 통계 및 분석", "🎯 타겟 공고 (내 업무)", "사이트 검토 필요(오류/개편)", "📝 게시판 / 메모장"]
 )
 st.sidebar.divider()
 
@@ -268,9 +258,8 @@ if menu == "공고 자동수집":
             target_script = "main_pure.py" if "빠른" in engine_choice else "main.py" if "정밀" in engine_choice else "main_max.py"
             with st.status(f"🚀 [{target_script}] 로봇 출동! 데이터를 수집 중입니다...", expanded=True) as status:
                 try:
-                    # 🌟 수집 시작 즉시 락을 걸면서 엔진 이름과 시간을 함께 기록합니다!
                     manage_sheet_lock("lock_and_log", engine_name=engine_choice)
-                    get_recent_log.clear() # 다른 팀원들도 바로 볼 수 있게 캐시를 날려버림
+                    get_recent_log.clear() 
                     
                     process = subprocess.Popen(
                         [sys.executable, "-u", target_script, str(collect_days), collect_keywords],
@@ -357,13 +346,18 @@ elif menu == "공고 통계 및 분석":
     st.title("📊 공고 통계 및 분석 대시보드")
     df = get_google_sheet("notices")
     if not df.empty and '공고제목' in df.columns:
+        if '검토유무' not in df.columns: df['검토유무'] = '미검토'
+        my_tasks_count = len(df[df['검토유무'] == '내업무맞음'])
+        
         col1, col2, col3 = st.columns(3)
         col1.metric("총 누적 수집 공고", f"{len(df)} 건")
-        col2.metric("공고 발주 기관 수", f"{df['출처'].nunique()} 곳")
+        col2.metric("🎯 '내 업무' 분류 공고", f"{my_tasks_count} 건")
+        
         parsed_dates = pd.Series(dtype='datetime64[ns]')
         if '등록일' in df.columns:
             parsed_dates = pd.to_datetime(df['등록일'].astype(str).str.replace('.', '-'), errors='coerce').dropna()
-            if not parsed_dates.empty: col3.metric("마지막 발주(등록) 일자", parsed_dates.max().strftime('%Y-%m-%d'))
+            if not parsed_dates.empty: col3.metric("마지막 발주 일자", parsed_dates.max().strftime('%Y-%m-%d'))
+            
         st.divider()
         top_col1, top_col2 = st.columns(2)
         with top_col1:
@@ -406,26 +400,57 @@ elif menu == "공고 통계 및 분석":
                     fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), hovermode="x unified")
                     st.plotly_chart(fig, use_container_width=True)
         with bottom_col2:
-            st.subheader("🏆 최다 발주처 Top 10")
+            st.subheader("🏆 전체 최다 발주처 Top 10")
             st.bar_chart(df['출처'].value_counts().head(10))
 
+        # 🌟 내 업무 맞음 전용 분석 섹션 (신규)
+        st.divider()
+        st.subheader("🔵 '내 업무' 타겟 공고 전용 집중 분석")
+        df_my = df[df['검토유무'] == '내업무맞음']
+        if not df_my.empty:
+            my_c1, my_c2 = st.columns(2)
+            with my_c1:
+                st.markdown("**🏆 '내 업무' 최다 발주 기관 Top 5**")
+                st.bar_chart(df_my['출처'].value_counts().head(5))
+            with my_c2:
+                st.markdown("**📍 '내 업무' 집중 지역 현황**")
+                my_region_counts = {k: 0 for k in region_keywords}
+                if '특이사항' in df_my.columns:
+                    for item in df_my['특이사항'].dropna().astype(str):
+                        if '지역제한' in item:
+                            for k in region_keywords:
+                                if k in item: my_region_counts[k] += 1
+                my_region_series = pd.Series(my_region_counts)
+                if my_region_series.sum() > 0: my_region_series = my_region_series[my_region_series > 0]
+                st.bar_chart(my_region_series)
+        else:
+            st.info("아직 '내 업무 맞음'으로 분류된 공고가 없어 전용 통계를 제공할 수 없습니다.")
+
 # ==========================================
-# 3. 공고수집성공기관 메뉴
+# 3. 🎯 타겟 공고 (내 업무) 메뉴 (완전 개편)
 # ==========================================
-elif menu == "공고수집성공기관":
-    st.title("🏛️ 공고 수집 성공 기관 목록")
+elif menu == "🎯 타겟 공고 (내 업무)":
+    st.title("🎯 수동 분류된 '내 업무' 공고 리스트")
+    st.info("💡 [공고 자동수집] 메뉴에서 수동으로 '🔵 우리의 업무 맞음'으로 분류하신 핵심 공고들만 모아서 보여줍니다.")
     try:
-        df_orgs = get_google_sheet("collected_orgs")
-        if not df_orgs.empty:
-            first_col_name = df_orgs.columns[0]
-            org_list = df_orgs[first_col_name].dropna().astype(str).unique().tolist()
-            clean_org_list = [org.strip() for org in org_list if org.strip() and org.lower() != 'nan']
-            if clean_org_list:
-                st.success(f"🎉 총 {len(clean_org_list)}개 기관에서 성공적으로 공고를 수집했습니다!")
-                display_df = pd.DataFrame({"✅ 수집 완료 기관 명단": clean_org_list})
-                display_df.index += 1
-                st.dataframe(display_df, use_container_width=True)
-    except Exception as e: pass
+        df = get_google_sheet("notices")
+        if not df.empty and '검토유무' in df.columns:
+            df_my = df[df['검토유무'] == '내업무맞음'].copy()
+            if not df_my.empty:
+                st.success(f"🎉 현재 총 {len(df_my)}건의 '내 업무' 공고가 보관되어 있습니다.")
+                display_columns = ['출처', '등록일', '공고제목', '특이사항', '상세링크']
+                st.dataframe(
+                    df_my[display_columns],
+                    column_config={"상세링크": st.column_config.LinkColumn("상세링크")},
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.warning("아직 분류된 내 업무 공고가 없습니다. [공고 자동수집] 탭에서 공고 앞 체크박스를 누르고 '우리의 업무 맞음(파랑)'을 눌러주세요.")
+        else:
+            st.warning("수집된 데이터가 존재하지 않습니다.")
+    except Exception as e:
+        st.error(f"데이터를 불러오는 중 오류가 발생했습니다: {e}")
 
 # ==========================================
 # 4. 사이트 검토 필요(오류/개편) 메뉴
