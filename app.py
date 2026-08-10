@@ -6,7 +6,10 @@ import sys
 import gspread
 import plotly.express as px
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+
+# 🌟 한국 표준시(KST) 강제 설정
+KST = timezone(timedelta(hours=9))
 
 # 화면 기본 설정
 st.set_page_config(page_title="맞춤 공고 수집 대시보드", layout="wide")
@@ -64,7 +67,7 @@ def manage_sheet_lock(action="check", engine_name=""):
                 range_name="A1:B2", 
                 values=[
                     ["running", str(time.time())],
-                    [engine_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+                    [engine_name, datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")]
                 ]
             )
         elif action == "unlock":
@@ -247,7 +250,6 @@ if menu == "공고 자동수집":
     with col2: 
         collect_keywords = st.text_input("🔑 수집 키워드 (쉼표 구분)", value="안전, 모집, 지정, 공고, 용역")
 
-    # 🌟 엔진 4번째 옵션 추가!
     engine_choice = st.radio("⚙️ 수집 엔진 선택", [
         "빠른 탐색(열람가능 사이트)", "정밀 탐색(셀레니움)", "극한 탐색(최대 60초 대기/셀레니움)", "🌟 주요 4대 중앙 사이트 전용 탐색"
     ])
@@ -259,7 +261,7 @@ if menu == "공고 자동수집":
             if "빠른" in engine_choice: target_script = "main_pure.py"
             elif "정밀" in engine_choice: target_script = "main.py"
             elif "극한" in engine_choice: target_script = "main_max.py"
-            else: target_script = "main_major.py" # 🌟 신규 엔진 파일 연결
+            else: target_script = "main_major.py"
             
             with st.status(f"🚀 [{target_script}] 로봇 출동! 데이터를 수집 중입니다...", expanded=True) as status:
                 try:
@@ -491,7 +493,7 @@ elif menu == "📝 게시판 / 메모장":
                 except gspread.exceptions.WorksheetNotFound:
                     ws_memos = doc.add_worksheet("memos", 100, 2)
                     ws_memos.update(range_name="A1:B1", values=[["작성일시", "메모 내용"]])
-                ws_memos.append_row([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), memo_text.strip()])
+                ws_memos.append_row([datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"), memo_text.strip()])
                 st.success("✅ 메모가 성공적으로 등록되었습니다!")
                 get_google_sheet.clear()
                 time.sleep(0.5)
