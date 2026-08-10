@@ -297,12 +297,15 @@ if menu == "공고 자동수집":
         search_keyword = st.sidebar.text_input("공고제목 / 특이사항 검색", "")
         search_org = st.sidebar.text_input("발주기관(출처) 검색", "")
         date_range = st.sidebar.date_input("등록일자 범위 지정", [])
-        hide_reviewed = st.sidebar.checkbox("✅ 검토 완료된 공고 숨기기", value=False)
+        
+        # 🌟 기본값을 True로 주어 대시보드 입장 시 즉각 깔끔한 화면을 제공합니다.
+        hide_reviewed = st.sidebar.checkbox("✅ 검토 완료된 공고 숨기기", value=True)
 
         filtered_df = df.copy()
         
         if hide_reviewed:
-            filtered_df = filtered_df[~filtered_df['검토유무'].isin(['완료', '내업무아님'])]
+            # 🌟 '완료', '내업무아님', '내업무맞음' 세 가지 상태를 모두 싹 다 숨깁니다.
+            filtered_df = filtered_df[~filtered_df['검토유무'].isin(['완료', '내업무아님', '내업무맞음'])]
             
         if search_keyword: 
             filtered_df = filtered_df[
