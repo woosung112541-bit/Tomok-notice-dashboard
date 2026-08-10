@@ -2,7 +2,7 @@ import os
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import urllib.parse
 import urllib3
 import time
@@ -22,6 +22,10 @@ warnings.filterwarnings("ignore", module='bs4')
 
 G2B_API_KEY = "9f7b495399ad64ec35b86f54a0a933fdf368b264bed9bcbf4e9b11556b6c9ff9"
 
+# 🌟 한국 표준시(KST) 기반으로 시간 강제 연산
+KST = timezone(timedelta(hours=9))
+now_kst = datetime.now(KST).replace(tzinfo=None)
+
 if len(sys.argv) >= 3:
     DAYS_AGO = int(sys.argv[1])
     TARGET_KEYWORDS = [word.strip() for word in sys.argv[2].split(',')]
@@ -29,9 +33,9 @@ else:
     DAYS_AGO = 15
     TARGET_KEYWORDS = ["안전", "모집", "지정", "공고", "용역"]
 
-if DAYS_AGO == 0: target_date_limit = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-else: target_date_limit = datetime.now() - timedelta(days=DAYS_AGO)
-current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+if DAYS_AGO == 0: target_date_limit = now_kst.replace(hour=0, minute=0, second=0, microsecond=0)
+else: target_date_limit = now_kst - timedelta(days=DAYS_AGO)
+current_time = now_kst.strftime("%Y-%m-%d %H:%M:%S")
 
 BOARD_MENU_KEYWORDS = ["고시공고", "고시", "공고", "입찰", "발주", "새소식", "공지", "알림", "소식", "게시판"]
 ORG_NAME_COL_INDEX = 2 
@@ -67,11 +71,7 @@ try:
 except Exception as e:
     sys.exit(1)
 
-COMMON_ROW_SELECTORS = [
-    "table.board_list tbody tr", "table.board-list tbody tr",
-    "div.board_list tbody tr", ".list_tbl tbody tr", "tbody > tr",
-    "ul.board_list > li", "div.list > ul > li"
-]
+COMMON_ROW_SELECTORS = ["table.board_list tbody tr", "table.board-list tbody tr", "div.board_list tbody tr", ".list_tbl tbody tr", "tbody > tr", "ul.board_list > li", "div.list > ul > li"]
 
 def get_domain(url):
     try: return urllib.parse.urlparse(str(url)).netloc
@@ -153,18 +153,17 @@ def smart_scrape_board(url, domain, org_name):
                 title = " ".join(title_tag.stripped_strings)
                 if not title: title = title_tag.get_text(strip=True)
                 href = title_tag.get('href', '').strip()
-                
-                # 🌟 1단계 타겟 (한국시설안전협회) 자바스크립트 직통 링크 조립 코드
                 if "assi.or.kr" in url and "javascript:view" in href.lower():
                     match = re.search(r"view\(['\"]?(\d+)['\"]?\)", href, re.IGNORECASE)
-                    if match:
-                        link = f"http://www.assi.or.kr/sub/board/gongji_view.asp?idx={match.group(1)}"
-                    else:
-                        link = url
-                elif "javascript:" in href.lower() or href == "#":
-                    link = url
-                else:
-                    link = urllib.parse.urljoin(url, href)
+                    if match: link = f"http://www.assi.or.kr/sub/board/gongji_view.asp?idx={match.group(1)}"
+                    else: link = url
+                elif "pps.go.kr" in url and title_tag.has_attr('onclick'):
+                    onclick_text = title_tag['onclick']
+                    match = re.search(r"['\"]([0-9a-zA-Z_]+)['\"]", onclick_text)
+                    if match: link = f"https://www.pps.go.kr/kor/bbs/view.do?key=00641&bbsSn={match.group(1)}"
+                    else: link = url
+                elif "javascript:" in href.lower() or href == "#": link = url
+                else: link = urllib.parse.urljoin(url, href)
                     
                 found_dates = []
                 for text in row.stripped_strings:
@@ -172,9 +171,7 @@ def smart_scrape_board(url, domain, org_name):
                     for match in matches:
                         y, m, d = match.groups()
                         if len(y) == 2: y = "20" + y 
-                        try:
-                            pd_date = datetime(int(y), int(m), int(d))
-                            found_dates.append(pd_date)
+                        try: pd_date = datetime(int(y), int(m), int(d)); found_dates.append(pd_date)
                         except: pass
                 post_date = None
                 date_str = ""
@@ -190,25 +187,47 @@ def smart_scrape_board(url, domain, org_name):
 
 def fetch_g2b_api(api_key, days_ago, keywords):
     if not api_key: return []
-    end_dt = datetime.now().strftime("%Y%m%d2359")
-    start_dt = (datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d0000")
+    # 🌟 G2B API 시간도 KST 기반으로 조회
+    g2b_now_kst = datetime.now(timezone(timedelta(hours=9)))
+    end_dt = g2b_now_kst.strftime("%Y%m%d2359")
+    start_dt = (g2b_now_kst - timedelta(days=days_ago)).strftime("%Y%m%d0000")
     results = []
-    url = "http://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblancListInfoServc"
-    params = {"serviceKey": api_key, "numOfRows": "999", "pageNo": "1", "inqryDiv": "1", "inqryBgnDt": start_dt, "inqryEndDt": end_dt, "type": "json"}
-    try:
-        res = requests.get(url, params=params, timeout=15)
-        if res.status_code == 200:
-            items = res.json().get('response', {}).get('body', {}).get('items', [])
-            for item in items:
-                title = item.get('bidNtceNm', '')
-                if not keywords or any(kw in title for kw in keywords):
-                    region = item.get('prtcptPosblRgnNm', '')
-                    quelfc = item.get('bidQuelfcCdNm', '')
-                    special = []
-                    if region: special.append(f"지역제한({region})")
-                    if quelfc: special.append("자격제한(상세확인)")
-                    results.append({'출처': f"{item.get('dmdInsttNm', '조달청')} (나라장터)", '등록일': item.get('bidNtceDt', '')[:10].replace('-', '.'), '공고제목': title, '상세링크': item.get('bidNtceDtlUrl', ''), '특이사항': "🔥 " + ", ".join(special) if special else "-"})
-    except: pass
+    endpoints = ["getFcltyBidPblancListInfoServc", "getServcBidPblancListInfoServc", "getBidPblancListInfoServc"]
+    
+    for endpoint in endpoints:
+        url = f"http://apis.data.go.kr/1230000/BidPublicInfoService04/{endpoint}"
+        params = {"serviceKey": api_key, "numOfRows": "999", "pageNo": "1", "inqryDiv": "1", "inqryBgnDt": start_dt, "inqryEndDt": end_dt, "type": "json"}
+        try:
+            res = requests.get(url, params=params, timeout=30)
+            if res.status_code == 200:
+                items = res.json().get('response', {}).get('body', {}).get('items', [])
+                for item in items:
+                    title = item.get('bidNtceNm', '')
+                    if not keywords or any(kw in title for kw in keywords):
+                        region = item.get('prtcptPosblRgnNm', '')
+                        quelfc = item.get('bidQuelfcCdNm', '')
+                        link = item.get('bidNtceDtlUrl', '')
+                        
+                        special = []
+                        if region: special.append(f"지역제한({region})")
+                        if quelfc: special.append("자격제한(상세확인)")
+                        
+                        deep_special = deep_scan_notice(link) if link else "-"
+                        
+                        final_special = []
+                        if special: final_special.append("🔥 " + ", ".join(special))
+                        if deep_special != "-": final_special.append(deep_special)
+                        final_special_str = " / ".join(final_special) if final_special else "-"
+                        
+                        if not any(r['공고제목'] == title and r['출처'].startswith(item.get('dmdInsttNm', '조달청')) for r in results):
+                            results.append({
+                                '출처': f"{item.get('dmdInsttNm', '조달청')} (나라장터)", 
+                                '등록일': item.get('bidNtceDt', '')[:10].replace('-', '.'), 
+                                '공고제목': title, 
+                                '상세링크': link, 
+                                '특이사항': final_special_str
+                            })
+        except: pass
     return results
 
 try:
