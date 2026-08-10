@@ -38,7 +38,7 @@ if not check_password():
     st.stop()
 
 # ==========================================
-# 🛑 영구 불멸의 '구글 시트' 자물쇠 시스템
+# 🛑 영구 불멸의 '구글 시트' 자물쇠 시스템 (락+로그 동시 처리 최적화)
 # ==========================================
 def manage_sheet_lock(action="check", engine_name=""):
     try:
@@ -59,12 +59,20 @@ def manage_sheet_lock(action="check", engine_name=""):
                     return False
                 return True
             return False
-        elif action == "lock":
-            ws.update(range_name="A1:B1", values=[["running", str(time.time())]])
+            
+        elif action == "lock_and_log":
+            # 🌟 구글 API 에러 방지를 위해 자물쇠와 로그를 단 한 번의 통신으로 묶어서 기록합니다.
+            ws.update(
+                range_name="A1:B2", 
+                values=[
+                    ["running", str(time.time())],
+                    [engine_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+                ]
+            )
+            
         elif action == "unlock":
             ws.update(range_name="A1:B1", values=[["free", str(time.time())]])
-        elif action == "log":
-            ws.update(range_name="A2:B2", values=[[engine_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S")]])
+            
     except Exception as e:
         return False
 
@@ -205,7 +213,6 @@ def render_notice_table(df, key_prefix):
                         st.rerun()
             else: st.warning("선택된 공고가 없습니다.")
     with c4:
-        # 🌟 안전장치: st.popover를 이용해 초기화 버튼 클릭 시 한 번 더 물어보는 팝업 생성!
         if selected_keys:
             with st.popover("🔄 상태 초기화 (미검토)", use_container_width=True):
                 st.error("⚠️ 정말 상태를 '미검토'로 초기화하시겠습니까?")
@@ -261,7 +268,10 @@ if menu == "공고 자동수집":
             target_script = "main_pure.py" if "빠른" in engine_choice else "main.py" if "정밀" in engine_choice else "main_max.py"
             with st.status(f"🚀 [{target_script}] 로봇 출동! 데이터를 수집 중입니다...", expanded=True) as status:
                 try:
-                    manage_sheet_lock("lock")
+                    # 🌟 수집 시작 즉시 락을 걸면서 엔진 이름과 시간을 함께 기록합니다!
+                    manage_sheet_lock("lock_and_log", engine_name=engine_choice)
+                    get_recent_log.clear() # 다른 팀원들도 바로 볼 수 있게 캐시를 날려버림
+                    
                     process = subprocess.Popen(
                         [sys.executable, "-u", target_script, str(collect_days), collect_keywords],
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', bufsize=1
@@ -272,8 +282,6 @@ if menu == "공고 자동수집":
 
                     if process.returncode == 0:
                         status.update(label="✅ 공고 수집 완료!", state="complete", expanded=False)
-                        manage_sheet_lock("log", engine_name=engine_choice)
-                        get_recent_log.clear() # 로그 갱신
                         get_google_sheet.clear() 
                     else:
                         status.update(label="❌ 수집 실패", state="error", expanded=True)
