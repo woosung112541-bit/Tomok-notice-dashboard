@@ -150,7 +150,17 @@ def smart_scrape_board(url, domain, org_name):
                 title = " ".join(title_tag.stripped_strings)
                 if not title: title = title_tag.get_text(strip=True)
                 href = title_tag.get('href', '').strip()
-                link = url if "javascript:" in href.lower() or href == "#" else urllib.parse.urljoin(url, href)
+                
+                # 🌟 1단계 타겟 (한국시설안전협회) 직통 링크 조립 코드
+                if "assi.or.kr" in url and "javascript:view" in href.lower():
+                    match = re.search(r"view\(['\"]?(\d+)['\"]?\)", href, re.IGNORECASE)
+                    if match: link = f"http://www.assi.or.kr/sub/board/gongji_view.asp?idx={match.group(1)}"
+                    else: link = url
+                elif "javascript:" in href.lower() or href == "#":
+                    link = url
+                else:
+                    link = urllib.parse.urljoin(url, href)
+                    
                 found_dates = []
                 for text in row.stripped_strings:
                     matches = re.finditer(r'(20\d{2}|\d{2})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})', text)
@@ -206,7 +216,17 @@ def smart_scrape_board_with_selenium(url, domain, org_name):
                 title = " ".join(title_tag.stripped_strings)
                 if not title: title = title_tag.get_text(strip=True)
                 href = title_tag.get('href', '').strip()
-                link = url if "javascript:" in href.lower() or href == "#" else urllib.parse.urljoin(url, href)
+                
+                # 🌟 1단계 타겟 (한국시설안전협회) 직통 링크 조립 코드
+                if "assi.or.kr" in url and "javascript:view" in href.lower():
+                    match = re.search(r"view\(['\"]?(\d+)['\"]?\)", href, re.IGNORECASE)
+                    if match: link = f"http://www.assi.or.kr/sub/board/gongji_view.asp?idx={match.group(1)}"
+                    else: link = url
+                elif "javascript:" in href.lower() or href == "#":
+                    link = url
+                else:
+                    link = urllib.parse.urljoin(url, href)
+                    
                 found_dates = []
                 for text in row.stripped_strings:
                     matches = re.finditer(r'(20\d{2}|\d{2})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})', text)
