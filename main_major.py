@@ -18,11 +18,19 @@ import warnings
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
 from webdriver_manager.chrome import ChromeDriverManager
 
 logging.getLogger("pypdf").setLevel(logging.ERROR)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 warnings.filterwarnings("ignore", module='bs4')
+
+# ==========================================
+# 🌟 4단계 아이건설넷 전용 계정 설정 (선택 사항)
+# ==========================================
+IGUNSUL_ID = "cosco0831" 
+IGUNSUL_PW = "임지수@1023" 
+# ==========================================
 
 G2B_API_KEY = "9f7b495399ad64ec35b86f54a0a933fdf368b264bed9bcbf4e9b11556b6c9ff9"
 
@@ -44,7 +52,6 @@ MINUS_KWS = ["건축분야", "신축", "번지", "증축", "수의", "건립"]
 REGION_KWS = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주']
 REGION_HINT_KWS = ['지역제한', '소재지', '영업소', '한정', '관내', '소재한', '위치한']
 
-# 🌟 엑셀 로딩 패스! 오직 핵심 3개 웹사이트만 타겟팅 (나라장터는 별도 API)
 MAJOR_SITES = [
     {'url': 'http://www.assi.or.kr/sub/board/gongji.asp?boardname=gongji', 'org_name': '한국시설안전협회'},
     {'url': 'https://www.pps.go.kr/kor/bbs/list.do?key=00641', 'org_name': '조달청 통합명부'},
@@ -72,6 +79,25 @@ def deep_scan_notice(url):
         res.encoding = 'utf-8'
         soup = BeautifulSoup(res.text, 'html.parser')
         full_text += soup.get_text()
+        
+        for a in soup.find_all('a', href=True):
+            href = a['href'].lower()
+            if href.endswith('.pdf') or href.endswith('.hwp'):
+                file_url = urllib.parse.urljoin(url, a['href'])
+                try:
+                    f_res = requests.get(file_url, headers=headers, verify=False, timeout=5, stream=True)
+                    if int(f_res.headers.get('content-length', 0)) < 5000000:
+                        content = f_res.content
+                        if href.endswith('.pdf'):
+                            reader = PdfReader(io.BytesIO(content))
+                            for page in reader.pages[:3]: full_text += " " + page.extract_text()
+                        elif href.endswith('.hwp'):
+                            f = olefile.OleFileIO(io.BytesIO(content))
+                            if f.exists('PrvText'):
+                                prv = f.openstream('PrvText').read().decode('utf-16le', errors='ignore')
+                                full_text += " " + prv
+                except: pass
+                
         for kw in PLUS_KWS:
             if kw in full_text: found_specials.add(f"🔴{kw}")
         for kw in MINUS_KWS:
@@ -102,11 +128,14 @@ def smart_scrape_board(url, domain, org_name):
                 title = " ".join(title_tag.stripped_strings)
                 if not title: title = title_tag.get_text(strip=True)
                 href = title_tag.get('href', '').strip()
-                
-                # 🌟 한국시설안전협회 1단계 해법 (JS 우회 정규식)
                 if "assi.or.kr" in url and "javascript:view" in href.lower():
                     match = re.search(r"view\(['\"]?(\d+)['\"]?\)", href, re.IGNORECASE)
                     if match: link = f"http://www.assi.or.kr/sub/board/gongji_view.asp?idx={match.group(1)}"
+                    else: link = url
+                elif "pps.go.kr" in url and title_tag.has_attr('onclick'):
+                    onclick_text = title_tag['onclick']
+                    match = re.search(r"['\"]([0-9a-zA-Z_]+)['\"]", onclick_text)
+                    if match: link = f"https://www.pps.go.kr/kor/bbs/view.do?key=00641&bbsSn={match.group(1)}"
                     else: link = url
                 elif "javascript:" in href.lower() or href == "#": link = url
                 else: link = urllib.parse.urljoin(url, href)
@@ -129,7 +158,6 @@ def smart_scrape_board(url, domain, org_name):
     except: pass
     return results
 
-# 🌟 최상위 스텔스 모드 드라이버 세팅 (아이건설넷 방어막 뚫기용)
 def get_stealth_driver():
     chrome_options = Options()
     chrome_options.add_argument("--headless") 
@@ -137,17 +165,15 @@ def get_stealth_driver():
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--window-size=1920x1080")
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled") # 봇 탐지 방해
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled") 
     chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
     chrome_options.add_experimental_option('useAutomationExtension', False)
-    
     try:
         service = Service('/usr/bin/chromedriver')
         driver = webdriver.Chrome(service=service, options=chrome_options)
     except:
         service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=chrome_options)
-        
     driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'})
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return driver
@@ -158,8 +184,71 @@ def smart_scrape_board_with_stealth_selenium(url, domain, org_name):
     try:
         driver = get_stealth_driver()
         driver.set_page_load_timeout(30)
-        driver.get(url)
-        time.sleep(5) 
+        
+        # 🌟 4단계 핵심: 아이건설넷 (스텔스 + 자동로그인 + 스크롤)
+        if "igunsul.net" in url:
+            if IGUNSUL_ID and IGUNSUL_PW:
+                try:
+                    driver.get("https://www.igunsul.net/login")
+                    time.sleep(3)
+                    driver.execute_script(f"document.querySelector('input[type=\"text\"], input[name*=\"id\"]').value='{IGUNSUL_ID}';")
+                    driver.execute_script(f"document.querySelector('input[type=\"password\"], input[name*=\"pw\"]').value='{IGUNSUL_PW}';")
+                    driver.execute_script("document.querySelector('form').submit();")
+                    time.sleep(3)
+                except: pass
+            driver.get(url)
+            time.sleep(5)
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);") 
+            time.sleep(2)
+            
+        elif "pps.go.kr" in url:
+            driver.get(url)
+            time.sleep(4)
+            rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
+            for i in range(len(rows)):
+                try:
+                    current_rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
+                    if i >= len(current_rows): break
+                    row = current_rows[i]
+                    a_tag = row.find_element(By.CSS_SELECTOR, "a")
+                    title = a_tag.text.strip()
+                    
+                    found_dates = []
+                    text_content = row.text
+                    matches = re.finditer(r'(20\d{2}|\d{2})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})', text_content)
+                    for match in matches:
+                        y, m, d = match.groups()
+                        if len(y) == 2: y = "20" + y 
+                        try: pd_date = datetime(int(y), int(m), int(d)); found_dates.append(pd_date)
+                        except: pass
+                    post_date = min(found_dates) if found_dates else None
+                    date_str = post_date.strftime("%Y.%m.%d") if post_date else ""
+                    
+                    if post_date and post_date >= target_date_limit:
+                        if not TARGET_KEYWORDS or any(keyword in title for keyword in TARGET_KEYWORDS):
+                            driver.execute_script("arguments[0].click();", a_tag)
+                            time.sleep(3)
+                            link = driver.current_url
+                            
+                            full_text = driver.page_source
+                            found_specials = set()
+                            for kw in PLUS_KWS:
+                                if kw in full_text: found_specials.add(f"🔴{kw}")
+                            for kw in MINUS_KWS:
+                                if kw in full_text: found_specials.add(f"🔵{kw}")
+                            special_notes = "🔥 " + ", ".join(list(found_specials)) if found_specials else "-"
+                            
+                            results.append({'출처': org_name, '등록일': date_str, '공고제목': title, '상세링크': link, '특이사항': special_notes})
+                            
+                            driver.get(url)
+                            time.sleep(3)
+                except: pass
+            return results
+            
+        else:
+            driver.get(url)
+            time.sleep(3) 
+
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         rows = []
         for selector in COMMON_ROW_SELECTORS:
@@ -172,7 +261,13 @@ def smart_scrape_board_with_stealth_selenium(url, domain, org_name):
                 title = " ".join(title_tag.stripped_strings)
                 if not title: title = title_tag.get_text(strip=True)
                 href = title_tag.get('href', '').strip()
-                link = urllib.parse.urljoin(url, href) if not ("javascript:" in href.lower() or href == "#") else url
+                if "assi.or.kr" in url and "javascript:view" in href.lower():
+                    match = re.search(r"view\(['\"]?(\d+)['\"]?\)", href, re.IGNORECASE)
+                    if match: link = f"http://www.assi.or.kr/sub/board/gongji_view.asp?idx={match.group(1)}"
+                    else: link = url
+                elif "javascript:" in href.lower() or href == "#": link = url
+                else: link = urllib.parse.urljoin(url, href)
+                    
                 found_dates = []
                 for text in row.stripped_strings:
                     matches = re.finditer(r'(20\d{2}|\d{2})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})', text)
@@ -198,22 +293,47 @@ def fetch_g2b_api(api_key, days_ago, keywords):
     end_dt = datetime.now().strftime("%Y%m%d2359")
     start_dt = (datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d0000")
     results = []
-    url = "http://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblancListInfoServc"
-    params = {"serviceKey": api_key, "numOfRows": "999", "pageNo": "1", "inqryDiv": "1", "inqryBgnDt": start_dt, "inqryEndDt": end_dt, "type": "json"}
-    try:
-        res = requests.get(url, params=params, timeout=30)
-        if res.status_code == 200:
-            items = res.json().get('response', {}).get('body', {}).get('items', [])
-            for item in items:
-                title = item.get('bidNtceNm', '')
-                if not keywords or any(kw in title for kw in keywords):
-                    region = item.get('prtcptPosblRgnNm', '')
-                    quelfc = item.get('bidQuelfcCdNm', '')
-                    special = []
-                    if region: special.append(f"지역제한({region})")
-                    if quelfc: special.append("자격제한(상세확인)")
-                    results.append({'출처': f"{item.get('dmdInsttNm', '조달청')} (나라장터)", '등록일': item.get('bidNtceDt', '')[:10].replace('-', '.'), '공고제목': title, '상세링크': item.get('bidNtceDtlUrl', ''), '특이사항': "🔥 " + ", ".join(special) if special else "-"})
-    except: pass
+    
+    endpoints = [
+        "getFcltyBidPblancListInfoServc", 
+        "getServcBidPblancListInfoServc", 
+        "getBidPblancListInfoServc"       
+    ]
+    
+    for endpoint in endpoints:
+        url = f"http://apis.data.go.kr/1230000/BidPublicInfoService04/{endpoint}"
+        params = {"serviceKey": api_key, "numOfRows": "999", "pageNo": "1", "inqryDiv": "1", "inqryBgnDt": start_dt, "inqryEndDt": end_dt, "type": "json"}
+        try:
+            res = requests.get(url, params=params, timeout=30)
+            if res.status_code == 200:
+                items = res.json().get('response', {}).get('body', {}).get('items', [])
+                for item in items:
+                    title = item.get('bidNtceNm', '')
+                    if not keywords or any(kw in title for kw in keywords):
+                        region = item.get('prtcptPosblRgnNm', '')
+                        quelfc = item.get('bidQuelfcCdNm', '')
+                        link = item.get('bidNtceDtlUrl', '')
+                        
+                        special = []
+                        if region: special.append(f"지역제한({region})")
+                        if quelfc: special.append("자격제한(상세확인)")
+                        
+                        deep_special = deep_scan_notice(link) if link else "-"
+                        
+                        final_special = []
+                        if special: final_special.append("🔥 " + ", ".join(special))
+                        if deep_special != "-": final_special.append(deep_special)
+                        final_special_str = " / ".join(final_special) if final_special else "-"
+                        
+                        if not any(r['공고제목'] == title and r['출처'].startswith(item.get('dmdInsttNm', '조달청')) for r in results):
+                            results.append({
+                                '출처': f"{item.get('dmdInsttNm', '조달청')} (나라장터)", 
+                                '등록일': item.get('bidNtceDt', '')[:10].replace('-', '.'), 
+                                '공고제목': title, 
+                                '상세링크': link, 
+                                '특이사항': final_special_str
+                            })
+        except: pass
     return results
 
 def process_major_site(site):
@@ -222,12 +342,10 @@ def process_major_site(site):
     site_notices = []
     
     if org_name == '한국시설안전협회':
-        # 1단계 맞춤 타격
         data = smart_scrape_board(base_url, domain, org_name)
         if not data: data = smart_scrape_board_with_stealth_selenium(base_url, domain, org_name)
         site_notices.extend(data)
     else:
-        # 조달청 통합명부 및 아이건설넷 스텔스 타격
         data = smart_scrape_board_with_stealth_selenium(base_url, domain, org_name)
         site_notices.extend(data)
         
