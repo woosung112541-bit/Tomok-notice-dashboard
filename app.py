@@ -247,15 +247,20 @@ if menu == "공고 자동수집":
     with col2: 
         collect_keywords = st.text_input("🔑 수집 키워드 (쉼표 구분)", value="안전, 모집, 지정, 공고, 용역")
 
+    # 🌟 엔진 4번째 옵션 추가!
     engine_choice = st.radio("⚙️ 수집 엔진 선택", [
-        "빠른 탐색(열람가능 사이트)", "정밀 탐색(셀레니움)", "극한 탐색(최대 60초 대기/셀레니움)"
+        "빠른 탐색(열람가능 사이트)", "정밀 탐색(셀레니움)", "극한 탐색(최대 60초 대기/셀레니움)", "🌟 주요 4대 중앙 사이트 전용 탐색"
     ])
 
     if st.button("공고 수집", type="primary"):
         if manage_sheet_lock("check"):
             st.warning("⏳ 현재 다른 팀원이 공고를 수집하고 있습니다. 서버 보호를 위해 잠시 후 새로고침(F5)을 눌러주세요!")
         else:
-            target_script = "main_pure.py" if "빠른" in engine_choice else "main.py" if "정밀" in engine_choice else "main_max.py"
+            if "빠른" in engine_choice: target_script = "main_pure.py"
+            elif "정밀" in engine_choice: target_script = "main.py"
+            elif "극한" in engine_choice: target_script = "main_max.py"
+            else: target_script = "main_major.py" # 🌟 신규 엔진 파일 연결
+            
             with st.status(f"🚀 [{target_script}] 로봇 출동! 데이터를 수집 중입니다...", expanded=True) as status:
                 try:
                     manage_sheet_lock("lock_and_log", engine_name=engine_choice)
@@ -403,7 +408,6 @@ elif menu == "공고 통계 및 분석":
             st.subheader("🏆 전체 최다 발주처 Top 10")
             st.bar_chart(df['출처'].value_counts().head(10))
 
-        # 🌟 내 업무 맞음 전용 분석 섹션 (신규)
         st.divider()
         st.subheader("🔵 '내 업무' 타겟 공고 전용 집중 분석")
         df_my = df[df['검토유무'] == '내업무맞음']
@@ -427,7 +431,7 @@ elif menu == "공고 통계 및 분석":
             st.info("아직 '내 업무 맞음'으로 분류된 공고가 없어 전용 통계를 제공할 수 없습니다.")
 
 # ==========================================
-# 3. 🎯 타겟 공고 (내 업무) 메뉴 (완전 개편)
+# 3. 🎯 타겟 공고 (내 업무) 메뉴 
 # ==========================================
 elif menu == "🎯 타겟 공고 (내 업무)":
     st.title("🎯 수동 분류된 '내 업무' 공고 리스트")
