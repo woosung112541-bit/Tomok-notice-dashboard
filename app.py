@@ -100,7 +100,6 @@ def get_google_sheet(sheet_name):
         return pd.DataFrame()
 
 def update_notice_status(notice_keys_to_mark, status_value):
-    """체크된 공고 상태를 구글 시트에 업데이트하며, API 초과 시 에러 방어"""
     try:
         gc = gspread.service_account(filename="google_key.json")
         doc = gc.open("맞춤공고_DB")
@@ -131,14 +130,14 @@ def update_notice_status(notice_keys_to_mark, status_value):
         return True
         
     except gspread.exceptions.APIError:
-        st.error("🚨 구글 시트 분당 접속 허용량을 초과했습니다! (체크박스 연속 클릭 등으로 인한 과부하) 약 1분 뒤에 다시 시도해주세요.")
+        st.error("🚨 구글 시트 분당 접속 허용량을 초과했습니다! 약 1분 뒤에 다시 시도해주세요.")
         return False
     except Exception as e:
         st.error(f"🚨 알 수 없는 오류 발생: {e}")
         return False
 
 # ==========================================
-# 🎨 테이블 렌더링 헬퍼 함수
+# 🎨 테이블 렌더링 헬퍼 함수 (배경색 완벽 고정 패치!)
 # ==========================================
 def render_notice_table(df, key_prefix):
     if df.empty:
@@ -150,17 +149,30 @@ def render_notice_table(df, key_prefix):
     display_df.insert(0, '선택', False)
     
     def highlight_row(row):
-        status = row.get('검토유무')
+        status = str(row.get('검토유무', '')).strip()
         title_text = str(row.get('공고제목', ''))
         special_text = str(row.get('특이사항', ''))
         
-        if status == '내업무맞음': return ['background-color: #dbeaff; color: #004080; font-weight: bold;'] * len(row)
-        if status == '내업무아님': return ['background-color: #b0b0b0; color: #404040; text-decoration: line-through;'] * len(row)
-        if status == '완료': return ['background-color: #f0f2f6; color: #a0aab2;'] * len(row)
-        if '안전점검' in title_text or '안전점검' in special_text: return ['background-color: #e6ffe6; color: #006600; font-weight: bold;'] * len(row)
+        # 1. 우리의 업무 아님 (가장 튀게: 진한 회색 바탕 + 흰색 글씨 + 취소선)
+        if status == '내업무아님': 
+            return ['background-color: #8c8c8c; color: #ffffff; text-decoration: line-through;'] * len(row)
+        # 2. 우리의 업무 맞음 (파란색 바탕 + 남색 글씨)
+        if status == '내업무맞음': 
+            return ['background-color: #cce5ff; color: #004080; font-weight: bold;'] * len(row)
+        # 3. 일반 검토 완료 (연한 회색 바탕)
+        if status == '완료': 
+            return ['background-color: #f0f2f6; color: #a0aab2;'] * len(row)
+        # 4. 안전점검 포함 (연두색 바탕)
+        if '안전점검' in title_text or '안전점검' in special_text: 
+            return ['background-color: #e6ffe6; color: #006600; font-weight: bold;'] * len(row)
+            
         return [''] * len(row)
         
     styled_df = display_df.style.apply(highlight_row, axis=1)
+    
+    # 🌟 핵심 방어 코드: 체크박스를 제외한 모든 열을 수정 불가(읽기 전용)로 묶어버립니다.
+    # 이렇게 해야 스트림릿이 자체 흰색 테마로 덮어씌우지 않고 우리가 지정한 배경색을 뿜어냅니다!
+    disabled_cols = [col for col in display_df.columns if col != '선택']
     
     edited_df = st.data_editor(
         styled_df,
@@ -169,7 +181,10 @@ def render_notice_table(df, key_prefix):
             "상세링크": st.column_config.LinkColumn("상세링크"),
             "notice_key": None
         },
-        hide_index=True, use_container_width=True, key=f"editor_{key_prefix}"
+        disabled=disabled_cols,  # <== 배경색을 지켜주는 마법의 열쇠
+        hide_index=True, 
+        use_container_width=True, 
+        key=f"editor_{key_prefix}"
     )
     
     selected_keys = edited_df[edited_df['선택'] == True]['notice_key'].tolist()
@@ -226,7 +241,7 @@ st.sidebar.link_button("🛒 나라장터", "https://www.g2b.go.kr/index.jsp")
 
 st.sidebar.divider()
 st.sidebar.subheader("⏱️ 최근 수집 엔진 기록")
-last_engine, last_time = get_recent_log() # 🌟 수정된 캐싱 함수 사용
+last_engine, last_time = get_recent_log() 
 st.sidebar.info(f"**엔진:** {last_engine}\n\n**시간:** {last_time}")
 
 # ==========================================
