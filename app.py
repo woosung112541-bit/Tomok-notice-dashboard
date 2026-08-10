@@ -38,7 +38,7 @@ if not check_password():
     st.stop()
 
 # ==========================================
-# 🛑 영구 불멸의 '구글 시트' 자물쇠 및 로그 시스템
+# 🛑 영구 불멸의 '구글 시트' 자물쇠 시스템
 # ==========================================
 def manage_sheet_lock(action="check", engine_name=""):
     try:
@@ -65,19 +65,24 @@ def manage_sheet_lock(action="check", engine_name=""):
             ws.update(range_name="A1:B1", values=[["free", str(time.time())]])
         elif action == "log":
             ws.update(range_name="A2:B2", values=[[engine_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S")]])
-        elif action == "get_log":
-            try:
-                eng = ws.cell(2, 1).value
-                tm = ws.cell(2, 2).value
-                return eng if eng else "기록 없음", tm if tm else "-"
-            except:
-                return "기록 없음", "-"
     except Exception as e:
-        if action == "get_log": return "조회 실패", "-"
         return False
 
+# 🌟 API 과부하 방지를 위한 로그 캐싱 (1분 동안 기억)
+@st.cache_data(ttl=60)
+def get_recent_log():
+    try:
+        gc = gspread.service_account(filename="google_key.json")
+        doc = gc.open("맞춤공고_DB")
+        ws = doc.worksheet("settings")
+        eng = ws.cell(2, 1).value
+        tm = ws.cell(2, 2).value
+        return eng if eng else "기록 없음", tm if tm else "-"
+    except:
+        return "기록 없음", "-"
+
 # ==========================================
-# ⚡ 데이터 통신 및 상태 업데이트 함수
+# ⚡ 데이터 통신 및 상태 업데이트 함수 (에러 방어막 추가)
 # ==========================================
 if "GOOGLE_CREDENTIALS" in st.secrets:
     with open("google_key.json", "w", encoding="utf-8") as f:
@@ -95,33 +100,45 @@ def get_google_sheet(sheet_name):
         return pd.DataFrame()
 
 def update_notice_status(notice_keys_to_mark, status_value):
-    gc = gspread.service_account(filename="google_key.json")
-    doc = gc.open("맞춤공고_DB")
-    worksheet = doc.worksheet("notices")
-    all_records = worksheet.get_all_values()
-    if not all_records: return
-    headers = all_records[0]
-    if "검토유무" not in headers:
-        headers.append("검토유무")
-        worksheet.update(range_name="1:1", values=[headers])
-        review_col_idx = len(headers) - 1
-    else:
-        review_col_idx = headers.index("검토유무")
+    """체크된 공고 상태를 구글 시트에 업데이트하며, API 초과 시 에러 방어"""
+    try:
+        gc = gspread.service_account(filename="google_key.json")
+        doc = gc.open("맞춤공고_DB")
+        worksheet = doc.worksheet("notices")
+        all_records = worksheet.get_all_values()
+        if not all_records: return True
         
-    key_col_idx = headers.index("notice_key")
-    cells_to_update = []
-    for row_idx, row in enumerate(all_records):
-        if row_idx == 0: continue
-        if len(row) <= review_col_idx: row.extend([""] * (review_col_idx - len(row) + 1))
-        
-        if row[key_col_idx] in notice_keys_to_mark:
-            cell = gspread.Cell(row=row_idx+1, col=review_col_idx+1, value=status_value)
-            cells_to_update.append(cell)
+        headers = all_records[0]
+        if "검토유무" not in headers:
+            headers.append("검토유무")
+            worksheet.update(range_name="1:1", values=[headers])
+            review_col_idx = len(headers) - 1
+        else:
+            review_col_idx = headers.index("검토유무")
             
-    if cells_to_update: worksheet.update_cells(cells_to_update)
+        key_col_idx = headers.index("notice_key")
+        cells_to_update = []
+        
+        for row_idx, row in enumerate(all_records):
+            if row_idx == 0: continue
+            if len(row) <= review_col_idx: row.extend([""] * (review_col_idx - len(row) + 1))
+            
+            if row[key_col_idx] in notice_keys_to_mark:
+                cell = gspread.Cell(row=row_idx+1, col=review_col_idx+1, value=status_value)
+                cells_to_update.append(cell)
+                
+        if cells_to_update: worksheet.update_cells(cells_to_update)
+        return True
+        
+    except gspread.exceptions.APIError:
+        st.error("🚨 구글 시트 분당 접속 허용량을 초과했습니다! (체크박스 연속 클릭 등으로 인한 과부하) 약 1분 뒤에 다시 시도해주세요.")
+        return False
+    except Exception as e:
+        st.error(f"🚨 알 수 없는 오류 발생: {e}")
+        return False
 
 # ==========================================
-# 🎨 테이블 렌더링 헬퍼 함수 (체크박스 및 버튼 통합)
+# 🎨 테이블 렌더링 헬퍼 함수
 # ==========================================
 def render_notice_table(df, key_prefix):
     if df.empty:
@@ -161,22 +178,34 @@ def render_notice_table(df, key_prefix):
     with c1:
         if st.button("🔵 우리의 업무 맞음 (파랑)", key=f"btn1_{key_prefix}", use_container_width=True):
             if selected_keys:
-                with st.spinner("적용 중..."): update_notice_status(selected_keys, "내업무맞음"); get_google_sheet.clear(); st.rerun()
+                with st.spinner("구글 시트에 적용 중..."): 
+                    if update_notice_status(selected_keys, "내업무맞음"):
+                        get_google_sheet.clear()
+                        st.rerun()
             else: st.warning("선택된 공고가 없습니다.")
     with c2:
         if st.button("⚫ 우리의 업무 아님 (진회색)", key=f"btn2_{key_prefix}", use_container_width=True):
             if selected_keys:
-                with st.spinner("적용 중..."): update_notice_status(selected_keys, "내업무아님"); get_google_sheet.clear(); st.rerun()
+                with st.spinner("구글 시트에 적용 중..."): 
+                    if update_notice_status(selected_keys, "내업무아님"):
+                        get_google_sheet.clear()
+                        st.rerun()
             else: st.warning("선택된 공고가 없습니다.")
     with c3:
         if st.button("✅ 일반 검토 완료 (연회색)", key=f"btn3_{key_prefix}", use_container_width=True):
             if selected_keys:
-                with st.spinner("적용 중..."): update_notice_status(selected_keys, "완료"); get_google_sheet.clear(); st.rerun()
+                with st.spinner("구글 시트에 적용 중..."): 
+                    if update_notice_status(selected_keys, "완료"):
+                        get_google_sheet.clear()
+                        st.rerun()
             else: st.warning("선택된 공고가 없습니다.")
     with c4:
         if st.button("🔄 상태 초기화 (미검토)", key=f"btn4_{key_prefix}", use_container_width=True):
             if selected_keys:
-                with st.spinner("적용 중..."): update_notice_status(selected_keys, "미검토"); get_google_sheet.clear(); st.rerun()
+                with st.spinner("구글 시트에 적용 중..."): 
+                    if update_notice_status(selected_keys, "미검토"):
+                        get_google_sheet.clear()
+                        st.rerun()
             else: st.warning("선택된 공고가 없습니다.")
 
 # ==========================================
@@ -197,7 +226,7 @@ st.sidebar.link_button("🛒 나라장터", "https://www.g2b.go.kr/index.jsp")
 
 st.sidebar.divider()
 st.sidebar.subheader("⏱️ 최근 수집 엔진 기록")
-last_engine, last_time = manage_sheet_lock("get_log")
+last_engine, last_time = get_recent_log() # 🌟 수정된 캐싱 함수 사용
 st.sidebar.info(f"**엔진:** {last_engine}\n\n**시간:** {last_time}")
 
 # ==========================================
@@ -234,6 +263,7 @@ if menu == "공고 자동수집":
                     if process.returncode == 0:
                         status.update(label="✅ 공고 수집 완료!", state="complete", expanded=False)
                         manage_sheet_lock("log", engine_name=engine_choice)
+                        get_recent_log.clear() # 로그 갱신
                         get_google_sheet.clear() 
                     else:
                         status.update(label="❌ 수집 실패", state="error", expanded=True)
@@ -272,7 +302,19 @@ if menu == "공고 자동수집":
             parsed_dates = pd.to_datetime(filtered_df['등록일'].astype(str).str.replace('.', '-'), errors='coerce').dt.date
             filtered_df = filtered_df[(parsed_dates >= start_date) & (parsed_dates <= end_date)]
 
-        # 🌟 4대 주요 중앙 사이트와 일반 기관 분리
+        col_btn1, col_btn2 = st.columns([3, 1])
+        with col_btn2:
+            if st.button("✅ 현재 화면 전체 '일반 검토완료' 일괄 처리", use_container_width=True):
+                keys_to_mark = filtered_df['notice_key'].tolist()
+                if keys_to_mark:
+                    with st.spinner("구글 시트에 적용 중..."):
+                        if update_notice_status(keys_to_mark, "완료"):
+                            get_google_sheet.clear()
+                            st.success("✅ 일괄 처리가 완료되었습니다!")
+                            time.sleep(1)
+                            st.rerun()
+                else: st.warning("처리할 공고가 없습니다.")
+
         main_sites_keywords = ['한국시설안전협회', '조달청', '아이건설넷', '나라장터']
         df_main = filtered_df[filtered_df['출처'].str.contains('|'.join(main_sites_keywords), na=False)]
         df_general = filtered_df[~filtered_df['출처'].str.contains('|'.join(main_sites_keywords), na=False)]
@@ -385,7 +427,7 @@ elif menu == "사이트 검토 필요(오류/개편)":
     except Exception as e: pass
 
 # ==========================================
-# 5. 📝 게시판 / 메모장 메뉴 (신규 추가)
+# 5. 📝 게시판 / 메모장 메뉴
 # ==========================================
 elif menu == "📝 게시판 / 메모장":
     st.title("📝 팀 게시판 및 메모장")
