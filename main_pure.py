@@ -44,7 +44,6 @@ MINUS_KWS = ["건축분야", "신축", "번지", "증축", "수의", "건립"]
 REGION_KWS = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주']
 REGION_HINT_KWS = ['지역제한', '소재지', '영업소', '한정', '관내', '소재한', '위치한']
 
-# 🌟 4대 주요 사이트 (나라장터는 API로 별도 처리)
 EXTRA_SITES = [
     {'url': 'http://www.assi.or.kr/sub/board/gongji.asp?boardname=gongji', 'org_name': '한국시설안전협회'},
     {'url': 'https://www.pps.go.kr/kor/bbs/list.do?key=00641', 'org_name': '조달청 통합명부'},
@@ -154,7 +153,19 @@ def smart_scrape_board(url, domain, org_name):
                 title = " ".join(title_tag.stripped_strings)
                 if not title: title = title_tag.get_text(strip=True)
                 href = title_tag.get('href', '').strip()
-                link = url if "javascript:" in href.lower() or href == "#" else urllib.parse.urljoin(url, href)
+                
+                # 🌟 1단계 타겟 (한국시설안전협회) 자바스크립트 직통 링크 조립 코드
+                if "assi.or.kr" in url and "javascript:view" in href.lower():
+                    match = re.search(r"view\(['\"]?(\d+)['\"]?\)", href, re.IGNORECASE)
+                    if match:
+                        link = f"http://www.assi.or.kr/sub/board/gongji_view.asp?idx={match.group(1)}"
+                    else:
+                        link = url
+                elif "javascript:" in href.lower() or href == "#":
+                    link = url
+                else:
+                    link = urllib.parse.urljoin(url, href)
+                    
                 found_dates = []
                 for text in row.stripped_strings:
                     matches = re.finditer(r'(20\d{2}|\d{2})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})', text)
@@ -210,7 +221,6 @@ try:
         if url_j.startswith('http'): target_sites.append({'url': url_j, 'org_name': org_name})
         if url_k.startswith('http'): target_sites.append({'url': url_k, 'org_name': org_name})
     
-    # 🌟 문제 기관 강제 직통 주소 오버라이드
     URL_OVERRIDES = {
         "대전교통공사": "https://www.djtc.kr/kor/board.do?menuIdx=361",
         "서산시": "https://www.seosan.go.kr/www/contents.do?key=1258",
