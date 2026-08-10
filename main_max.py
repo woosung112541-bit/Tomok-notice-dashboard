@@ -2,7 +2,7 @@ import os
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import urllib.parse
 import urllib3
 import time
@@ -26,13 +26,17 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 warnings.filterwarnings("ignore", module='bs4')
 
 # ==========================================
-# 🌟 4단계 아이건설넷 전용 계정 설정 (선택 사항)
+# 🌟 4단계 아이건설넷 전용 계정 설정 
 # ==========================================
 IGUNSUL_ID = "cosco0831" 
 IGUNSUL_PW = "dlawltn@1023" 
 # ==========================================
 
 G2B_API_KEY = "9f7b495399ad64ec35b86f54a0a933fdf368b264bed9bcbf4e9b11556b6c9ff9"
+
+# 🌟 한국 표준시(KST) 기반으로 시간 강제 연산
+KST = timezone(timedelta(hours=9))
+now_kst = datetime.now(KST).replace(tzinfo=None)
 
 if len(sys.argv) >= 3:
     DAYS_AGO = int(sys.argv[1])
@@ -41,9 +45,9 @@ else:
     DAYS_AGO = 15
     TARGET_KEYWORDS = ["안전", "모집", "지정", "공고", "용역"]
 
-if DAYS_AGO == 0: target_date_limit = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-else: target_date_limit = datetime.now() - timedelta(days=DAYS_AGO)
-current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+if DAYS_AGO == 0: target_date_limit = now_kst.replace(hour=0, minute=0, second=0, microsecond=0)
+else: target_date_limit = now_kst - timedelta(days=DAYS_AGO)
+current_time = now_kst.strftime("%Y-%m-%d %H:%M:%S")
 
 BOARD_MENU_KEYWORDS = ["고시공고", "고시", "공고", "입찰", "발주", "새소식", "공지", "알림", "소식", "게시판"]
 ORG_NAME_COL_INDEX = 2 
@@ -217,7 +221,6 @@ def smart_scrape_board_with_selenium(url, domain, org_name):
         driver = get_chrome_driver()
         driver.set_page_load_timeout(60)
         
-        # 🌟 4단계 핵심: 아이건설넷 (스텔스 + 자동로그인 + 스크롤)
         if "igunsul.net" in url:
             if IGUNSUL_ID and IGUNSUL_PW:
                 try:
@@ -308,11 +311,9 @@ def smart_scrape_board_with_selenium(url, domain, org_name):
                         if len(y) == 2: y = "20" + y 
                         try: pd_date = datetime(int(y), int(m), int(d)); found_dates.append(pd_date)
                         except: pass
-                post_date = None
-                date_str = ""
-                if found_dates:
-                    post_date = min(found_dates)
-                    date_str = post_date.strftime("%Y.%m.%d")
+                post_date = min(found_dates) if found_dates else None
+                date_str = post_date.strftime("%Y.%m.%d") if post_date else ""
+                
                 if post_date and post_date >= target_date_limit:
                     if not TARGET_KEYWORDS or any(keyword in title for keyword in TARGET_KEYWORDS):
                         special_notes = deep_scan_notice(link)
@@ -324,8 +325,10 @@ def smart_scrape_board_with_selenium(url, domain, org_name):
 
 def fetch_g2b_api(api_key, days_ago, keywords):
     if not api_key: return []
-    end_dt = datetime.now().strftime("%Y%m%d2359")
-    start_dt = (datetime.now() - timedelta(days=days_ago)).strftime("%Y%m%d0000")
+    # 🌟 G2B API 시간도 KST 기반으로 조회
+    g2b_now_kst = datetime.now(timezone(timedelta(hours=9)))
+    end_dt = g2b_now_kst.strftime("%Y%m%d2359")
+    start_dt = (g2b_now_kst - timedelta(days=days_ago)).strftime("%Y%m%d0000")
     results = []
     endpoints = ["getFcltyBidPblancListInfoServc", "getServcBidPblancListInfoServc", "getBidPblancListInfoServc"]
     
