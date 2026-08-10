@@ -137,7 +137,7 @@ def update_notice_status(notice_keys_to_mark, status_value):
         return False
 
 # ==========================================
-# 🎨 테이블 렌더링 헬퍼 함수 (배경색 완벽 고정 패치!)
+# 🎨 테이블 렌더링 헬퍼 함수 (배경색 고정 + 초기화 팝업 패치)
 # ==========================================
 def render_notice_table(df, key_prefix):
     if df.empty:
@@ -153,25 +153,15 @@ def render_notice_table(df, key_prefix):
         title_text = str(row.get('공고제목', ''))
         special_text = str(row.get('특이사항', ''))
         
-        # 1. 우리의 업무 아님 (가장 튀게: 진한 회색 바탕 + 흰색 글씨 + 취소선)
-        if status == '내업무아님': 
-            return ['background-color: #8c8c8c; color: #ffffff; text-decoration: line-through;'] * len(row)
-        # 2. 우리의 업무 맞음 (파란색 바탕 + 남색 글씨)
-        if status == '내업무맞음': 
-            return ['background-color: #cce5ff; color: #004080; font-weight: bold;'] * len(row)
-        # 3. 일반 검토 완료 (연한 회색 바탕)
-        if status == '완료': 
-            return ['background-color: #f0f2f6; color: #a0aab2;'] * len(row)
-        # 4. 안전점검 포함 (연두색 바탕)
-        if '안전점검' in title_text or '안전점검' in special_text: 
-            return ['background-color: #e6ffe6; color: #006600; font-weight: bold;'] * len(row)
+        if status == '내업무아님': return ['background-color: #8c8c8c; color: #ffffff; text-decoration: line-through;'] * len(row)
+        if status == '내업무맞음': return ['background-color: #cce5ff; color: #004080; font-weight: bold;'] * len(row)
+        if status == '완료': return ['background-color: #f0f2f6; color: #a0aab2;'] * len(row)
+        if '안전점검' in title_text or '안전점검' in special_text: return ['background-color: #e6ffe6; color: #006600; font-weight: bold;'] * len(row)
             
         return [''] * len(row)
         
     styled_df = display_df.style.apply(highlight_row, axis=1)
     
-    # 🌟 핵심 방어 코드: 체크박스를 제외한 모든 열을 수정 불가(읽기 전용)로 묶어버립니다.
-    # 이렇게 해야 스트림릿이 자체 흰색 테마로 덮어씌우지 않고 우리가 지정한 배경색을 뿜어냅니다!
     disabled_cols = [col for col in display_df.columns if col != '선택']
     
     edited_df = st.data_editor(
@@ -181,7 +171,7 @@ def render_notice_table(df, key_prefix):
             "상세링크": st.column_config.LinkColumn("상세링크"),
             "notice_key": None
         },
-        disabled=disabled_cols,  # <== 배경색을 지켜주는 마법의 열쇠
+        disabled=disabled_cols,
         hide_index=True, 
         use_container_width=True, 
         key=f"editor_{key_prefix}"
@@ -215,13 +205,18 @@ def render_notice_table(df, key_prefix):
                         st.rerun()
             else: st.warning("선택된 공고가 없습니다.")
     with c4:
-        if st.button("🔄 상태 초기화 (미검토)", key=f"btn4_{key_prefix}", use_container_width=True):
-            if selected_keys:
-                with st.spinner("구글 시트에 적용 중..."): 
-                    if update_notice_status(selected_keys, "미검토"):
-                        get_google_sheet.clear()
-                        st.rerun()
-            else: st.warning("선택된 공고가 없습니다.")
+        # 🌟 안전장치: st.popover를 이용해 초기화 버튼 클릭 시 한 번 더 물어보는 팝업 생성!
+        if selected_keys:
+            with st.popover("🔄 상태 초기화 (미검토)", use_container_width=True):
+                st.error("⚠️ 정말 상태를 '미검토'로 초기화하시겠습니까?")
+                if st.button("네, 초기화 실행", key=f"reset_{key_prefix}", use_container_width=True):
+                    with st.spinner("구글 시트에 적용 중..."): 
+                        if update_notice_status(selected_keys, "미검토"):
+                            get_google_sheet.clear()
+                            st.rerun()
+        else:
+            if st.button("🔄 상태 초기화 (미검토)", key=f"btn4_{key_prefix}", use_container_width=True):
+                st.warning("선택된 공고가 없습니다.")
 
 # ==========================================
 # 사이드바 메뉴 설정
