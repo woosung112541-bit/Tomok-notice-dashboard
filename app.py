@@ -183,10 +183,7 @@ def render_notice_table(df, key_prefix):
 # 사이드바 메뉴 설정
 # ==========================================
 st.sidebar.title("📌 메뉴 선택")
-menu = st.sidebar.radio(
-    "이동할 메뉴를 선택하세요:",
-    ["공고 자동수집", "공고 통계 및 분석", "🎯 타겟 공고", "사이트 검토 필요", "📝 게시판", "🧪 스텔스 랩 (한수원)"]
-)
+menu = st.sidebar.radio("이동할 메뉴를 선택하세요:", ["공고 자동수집", "공고 통계", "🎯 타겟 공고", "사이트 검토 필요", "📝 게시판", "🧪 스텔스 랩 (한수원)"])
 st.sidebar.divider()
 
 if menu == "공고 자동수집":
@@ -196,7 +193,7 @@ if menu == "공고 자동수집":
         st.write(f"현재 총 {len(df)}개의 공고가 로드되었습니다. (UI 생략)")
 
 # ==========================================
-# 6. 스텔스 테스트 랩 (Eager 스킵 제거, 정상 대기 및 봇 우회)
+# 6. 스텔스 테스트 랩 (None Load Strategy 적용)
 # ==========================================
 elif menu == "🧪 스텔스 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
@@ -220,7 +217,9 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 chrome_options.add_argument("--window-size=1920,1080")
                 chrome_options.add_argument("--lang=ko-KR")
                 
-                # 강력한 봇 우회(Stealth) 적용
+                # 🛑 핵심 무적 패치: 무한 로딩 원천 차단 (페이지가 다 안 불려와도 강제 진행)
+                chrome_options.page_load_strategy = 'none' 
+                
                 chrome_options.add_argument("--disable-blink-features=AutomationControlled")
                 chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
                 chrome_options.add_experimental_option('useAutomationExtension', False)
@@ -234,11 +233,16 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                     "acceptLanguage": 'ko-KR,ko;q=0.9'
                 })
                 
-                driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                st.write("접속 시작 (무한 로딩 무시 적용)...")
                 
-                st.write("접속 및 렌더링 대기 중 (최대 15초)...")
-                # 타임아웃 강제 예외처리를 제거하고, 사이트가 자연스럽게 로딩되도록 대기
-                driver.get(test_url)
+                # 네트워크 접속만 성공하면 바로 다음 코드로 넘어가도록 10초 제한
+                driver.set_page_load_timeout(10)
+                try:
+                    driver.get(test_url)
+                except:
+                    pass # 타임아웃 예외가 발생하든 말든 백그라운드 렌더링을 믿고 무시
+                
+                st.write("백그라운드 렌더링 대기 중 (15초)...")
                 time.sleep(15) 
                 
                 st.write("팝업 제거 시도...")
@@ -254,7 +258,7 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 try: driver.execute_script(js_close_popup); time.sleep(2) 
                 except: pass
                 
-                st.write("입찰공고조회 메뉴 탐색 및 클릭...")
+                st.write("입찰공고조회 메뉴 직접 타격...")
                 js_ultimate_hack = """
                 var plusBtns = document.querySelectorAll('a.plus, a.btn_more, a[title*="더보기"]');
                 for(var i=0; i<plusBtns.length; i++) {
@@ -284,7 +288,7 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 
                 st.write("데이터 렌더링 동적 대기 (최대 30초)...")
                 
-                # 경량화된 비주얼 스크래퍼 (최말단 텍스트 노드 추출)
+                # 비주얼 스크래퍼 (최말단 텍스트 노드 추출)
                 js_visual_scraper = """
                 var els = document.querySelectorAll('td, span, div, a');
                 var items = [];
@@ -369,7 +373,6 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                         search_clicked = True
 
                 st.write("최종 렌더링 화면 캡처 중...")
-                # 예외 없이 항상 스크린샷을 찍도록 보장
                 try:
                     screenshot = driver.get_screenshot_as_png()
                     st.image(screenshot, caption="최종 확보된 브라우저 화면")
