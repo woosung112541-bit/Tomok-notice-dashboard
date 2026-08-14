@@ -6,7 +6,9 @@ import sys
 import gspread
 import plotly.express as px
 import time
+import re
 from datetime import datetime, timedelta, timezone
+from bs4 import BeautifulSoup
 
 # 🌟 한국 표준시(KST) 강제 설정
 KST = timezone(timedelta(hours=9))
@@ -256,7 +258,7 @@ if menu == "공고 자동수집":
 
     if st.button("공고 수집", type="primary"):
         if manage_sheet_lock("check"):
-            st.warning("⏳ 현재 다른 팀원이 공고를 수집하고 있습니다. 서버 보호를 위해 잠시 후 새로고침(F5)을 눌러주세요!")
+            st.warning("⏳ 현재 다른 팀원이 공고 수집을 진행 중입니다. 서버 보호를 위해 잠시 후 새로고침(F5)을 눌러주세요!")
         else:
             if "빠른" in engine_choice: target_script = "main_pure.py"
             elif "정밀" in engine_choice: target_script = "main.py"
@@ -511,11 +513,11 @@ elif menu == "📝 게시판 / 메모장":
         st.write("아직 등록된 메모가 없습니다.")
 
 # ==========================================
-# 6. 🧪 스텔스 테스트 랩 (바보 로직 삭제 및 순수 텍스트 필터링판)
+# 6. 🧪 스텔스 테스트 랩 (인사이드-아웃 무적 추출판)
 # ==========================================
 elif menu == "🧪 스텔스 테스트 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
-    st.info("태그(<th>) 검사라는 멍청한 로직을 버리고, 오직 눈에 보이는 진짜 글자 데이터만 수확합니다.")
+    st.info("표의 구조를 무시하고, 화면에 흩뿌려진 텍스트 조각 중 진짜 데이터를 역추적하여 묶어옵니다.")
     
     test_url = st.text_input("타겟 URL (고정)", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
     
@@ -647,27 +649,39 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 else:
                     st.warning("⚠️ 지름길 버튼(+)과 메뉴를 모두 찾지 못했습니다.")
                 
-                # 🌟 최종 완결판 추출 함수: HTML 태그(TH, TD) 무관! 오직 텍스트 내용으로만 100% 필터링!
+                # 🌟 최종 무적 추출: 껍데기(Table/Tr) 다 무시하고, 알맹이 단어(전자입찰 등)를 먼저 찾은 뒤 묶어옵니다!
                 def extract_table_data(d):
                     soup = BeautifulSoup(d.page_source, 'html.parser')
-                    # DOM 내의 모든 row를 긁어옵니다.
-                    rows = soup.find_all("tr")
                     valid_rows = []
                     
-                    # 절대 공고 내용일 수 없는 제목/안내문/껍데기 단어들
-                    ignore_words = ['인증서', '비밀번호', '조회된 데이터가 없습니다', '표시할 데이터가 없습니다', 
-                                    '구매운영단위', '결과상태', '입찰방식', '공고일자', '공고차수', '정정/취소사유']
-                    
-                    for r in rows:
-                        # 1. 일단 줄 안의 텍스트를 파이프(|)로 이어서 뽑아봅니다.
-                        text = r.get_text(separator=' | ', strip=True)
-                        
-                        # 2. 텍스트가 20자 이상이고, 칸이 최소 4개(파이프 3개) 이상 나뉘어져 있으며
-                        # 3. 껍데기 단어(ignore_words)가 하나도 포함되어 있지 않다면 = 100% 진짜 데이터!
-                        if len(text) > 20 and text.count('|') >= 3 and not any(word in text for word in ignore_words):
-                            valid_rows.append(text)
-                            
-                    # 리스트 중복 제거 (그리드 특성상 똑같은 줄이 두 번 잡힐 수 있음)
+                    # 1단계: '전자입찰', '현장입찰', 'U2...' 같은 진짜 공고에만 있는 단어를 먼저 찾습니다.
+                    for el in soup.find_all(string=lambda t: t and ('전자입찰' in t or '현장입찰' in t or '입찰진행' in t or '공고진행' in t)):
+                        parent = el.find_parent()
+                        # 부모 껍데기를 타고 올라가며 한 줄의 데이터가 완성되는지 확인합니다.
+                        for _ in range(6): 
+                            if parent:
+                                text = parent.get_text(separator=' | ', strip=True)
+                                # 글자 수가 적당하고(한 줄 분량), 파이프가 2개 이상 쳐져 있다면 묶인 데이터로 봅니다.
+                                if 20 < len(text) < 300 and text.count('|') >= 2:
+                                    if '구매운영단위' not in text and '결과상태' not in text: # 헤더는 제외
+                                        valid_rows.append(text)
+                                        break # 찾았으면 더 이상 안 올라감
+                                parent = parent.find_parent()
+                                
+                    # 2단계: 최악의 경우 (셀이 완전히 박살나서 안 묶일 때) 정규식 강제 스캔
+                    if not valid_rows:
+                        full_text = soup.get_text(separator=' ')
+                        import re
+                        matches = re.findall(r'\b[A-Z]\d{2}[A-Z]\d{6}\b', full_text) # 공고번호 패턴 (예: U26S156000)
+                        if matches:
+                            for m in set(matches):
+                                idx = full_text.find(m)
+                                start = max(0, idx - 40)
+                                end = min(len(full_text), idx + 40)
+                                context = full_text[start:end].replace('\n', ' ').strip()
+                                valid_rows.append(f"[파편 수집] ... {context} ...")
+
+                    # 중복 제거
                     seen = set()
                     unique_rows = []
                     for x in valid_rows:
@@ -676,7 +690,7 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                             seen.add(x)
                             
                     if len(unique_rows) > 0:
-                        return [f"[{idx+1}] " + txt for idx, txt in enumerate(unique_rows[:15])]
+                        return [f"[{idx+1}] {txt}" for idx, txt in enumerate(unique_rows[:15])]
                     return None
 
                 st.write("⏳ 로딩 스피너(동그라미) 대기 및 진짜 데이터 추출 진행 중 (최대 20초)...")
