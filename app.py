@@ -193,7 +193,7 @@ if menu == "공고 자동수집":
         st.write(f"현재 총 {len(df)}개의 공고가 로드되었습니다. (UI 생략)")
 
 # ==========================================
-# 6. 스텔스 테스트 랩 (비동기 Hit & Run 무적 패치 적용)
+# 6. 스텔스 테스트 랩 (시한폭탄 지연 클릭 무적 패치 적용)
 # ==========================================
 elif menu == "🧪 스텔스 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
@@ -217,8 +217,9 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 chrome_options.add_argument("--window-size=1920,1080")
                 chrome_options.add_argument("--lang=ko-KR")
                 
-                # 무한 로딩 원천 차단
-                chrome_options.page_load_strategy = 'none' 
+                # Eager 전략 복구 (None은 렌더링 누락 가능성이 큼)
+                chrome_options.page_load_strategy = 'eager'
+                
                 chrome_options.add_argument("--disable-blink-features=AutomationControlled")
                 chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
                 chrome_options.add_experimental_option('useAutomationExtension', False)
@@ -227,44 +228,44 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 except: service = Service(ChromeDriverManager().install())
                 driver = webdriver.Chrome(service=service, options=chrome_options)
                 
-                # 🛑 무적 패치 1: 15초 넘으면 무조건 로딩 끊어버림
-                driver.set_page_load_timeout(15)
-                
                 driver.execute_cdp_cmd('Network.setUserAgentOverride', {
                     "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
                     "acceptLanguage": 'ko-KR,ko;q=0.9'
                 })
                 
-                st.write("접속 시작 (무한 로딩 15초 제한 컷)...")
+                driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                
+                st.write("접속 시작 (타임아웃 30초 제한)...")
+                driver.set_page_load_timeout(30)
                 try:
                     driver.get(test_url)
                 except:
-                    pass # 15초 지나서 타임아웃 나도 당황하지 않고 다음 코드로 넘어감!
+                    st.write("(알림) 로딩 지연으로 강제 진행합니다...")
                 
-                st.write("백그라운드 렌더링 대기 중 (10초)...")
-                time.sleep(10) 
+                st.write("백그라운드 렌더링 대기 중 (15초)...")
+                time.sleep(15) 
                 
-                st.write("팝업 제거 시도 (비동기)...")
-                # 🛑 무적 패치 2: 팝업 닫기도 setTimeout으로 쏘고 도망감
+                st.write("팝업 제거 시도...")
                 js_close_popup = """
                 document.querySelectorAll('a, button, span, img').forEach(el => {
                     var t = (el.innerText || '').trim();
                     var a = (el.getAttribute('alt') || '').trim();
                     if(['닫기', '하루동안 열지 않기', 'X', 'close'].includes(t) || ['닫기', 'close'].includes(a)) {
-                        setTimeout(function(){ el.click(); }, 10);
+                        el.click();
                     }
                 });
                 """
                 try: driver.execute_script(js_close_popup); time.sleep(2) 
                 except: pass
                 
-                st.write("입찰공고조회 메뉴 직접 타격 (비동기 Hit & Run)...")
-                # 🛑 무적 패치 3: 메뉴 클릭 후 페이지 이동 대기 없이 바로 파이썬으로 복귀!
+                st.write("입찰공고조회 메뉴 직접 타격 (1초 지연 시한폭탄)...")
+                
+                # 🛑 무적 패치 1: 클릭 명령을 1초(1000ms) 뒤로 미뤄서 데드락 방지
                 js_ultimate_hack = """
                 var plusBtns = document.querySelectorAll('a.plus, a.btn_more, a[title*="더보기"]');
                 if(plusBtns.length > 0) {
-                    setTimeout(function() { plusBtns[0].click(); }, 10);
-                    return 'SUCCESS: 더보기 클릭(비동기)';
+                    setTimeout(function(){ plusBtns[0].click(); }, 1000);
+                    return 'SUCCESS';
                 }
                 var els = document.querySelectorAll('a, span, li, button');
                 for(var i=0; i<els.length; i++) {
@@ -273,11 +274,11 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                         var href = el.getAttribute('href');
                         if(href && href.indexOf('javascript:') > -1) { 
                             var jsCode = href.replace('javascript:', '');
-                            setTimeout(function() { eval(jsCode); }, 10);
-                            return 'SUCCESS: JS 실행(비동기)'; 
+                            setTimeout(function(){ eval(jsCode); }, 1000);
+                            return 'SUCCESS'; 
                         }
-                        setTimeout(function() { el.click(); }, 10);
-                        return 'SUCCESS: 직접 클릭(비동기)';
+                        setTimeout(function(){ el.click(); }, 1000);
+                        return 'SUCCESS';
                     }
                 }
                 return 'NOT_FOUND';
@@ -288,15 +289,18 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                     try:
                         if frame: driver.switch_to.frame(frame)
                         res = driver.execute_script(js_ultimate_hack)
-                        if 'SUCCESS' in res:
-                            driver.switch_to.default_content()
+                        if res == 'SUCCESS':
+                            driver.switch_to.default_content() # 1초 지연 덕분에 파괴되기 전에 안전하게 탈출!
                             break
                         driver.switch_to.default_content()
-                    except: driver.switch_to.default_content()
+                    except: 
+                        driver.switch_to.default_content()
                 
-                st.write("데이터 렌더링 동적 대기 (최대 30초)...")
+                # 클릭이 발생하고 페이지가 넘어갈 때까지 충분히 대기
+                st.write("페이지 이동 및 렌더링 동적 대기 (최대 30초)...")
+                time.sleep(10)
                 
-                # 비주얼 스크래퍼 (이건 화면만 읽어오는 거라 에러 안남)
+                # 비주얼 스크래퍼
                 js_visual_scraper = """
                 var els = document.querySelectorAll('td, span, div, a');
                 var items = [];
@@ -332,7 +336,8 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 
                 for attempt in range(15):
                     time.sleep(2)
-                    driver.execute_script("window.dispatchEvent(new Event('resize'));")
+                    try: driver.execute_script("window.dispatchEvent(new Event('resize'));")
+                    except: pass
                     
                     frames = [None] + driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
                     
@@ -366,21 +371,25 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                         break 
                         
                     if attempt == 4 and not search_clicked:
-                        st.write("조회 지연 감지. '검색' 버튼 강제 클릭 (비동기)...")
-                        # 🛑 무적 패치 4: 검색 버튼도 누르고 도망가기
+                        st.write("조회 지연 감지. '검색' 버튼 강제 클릭 (1초 지연)...")
+                        # 🛑 무적 패치 2: 검색 버튼 클릭 시에도 1초 지연 시한폭탄 설치
                         js_search_click = """
                         document.querySelectorAll('a, button, span').forEach(el => {
                             if((el.innerText || '').trim() === '검색') {
-                                setTimeout(function(){ el.click(); }, 10);
+                                setTimeout(function(){ el.click(); }, 1000);
                             }
                         });
+                        return 'SUCCESS';
                         """
                         for f in frames:
                             try:
                                 if f: driver.switch_to.frame(f)
-                                driver.execute_script(js_search_click)
+                                res = driver.execute_script(js_search_click)
+                                if res == 'SUCCESS':
+                                    driver.switch_to.default_content()
+                                    break
                                 driver.switch_to.default_content()
-                            except: pass
+                            except: driver.switch_to.default_content()
                         search_clicked = True
 
                 st.write("최종 렌더링 화면 캡처 중...")
