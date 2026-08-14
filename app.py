@@ -511,11 +511,11 @@ elif menu == "📝 게시판 / 메모장":
         st.write("아직 등록된 메모가 없습니다.")
 
 # ==========================================
-# 6. 🧪 스텔스 테스트 랩 (사용자 제보 3단 콤보 완결판)
+# 6. 🧪 스텔스 테스트 랩 (마우스 Hover 액션 및 3단 콤보 탑재판)
 # ==========================================
 elif menu == "🧪 스텔스 테스트 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
-    st.info("대표님이 제보해주신 '입찰공고 -> 입찰공고 -> 입찰공고조회' 3단계 루트를 정확히 밟아 들어갑니다.")
+    st.info("대표님이 제보해주신 정석 루트에 따라 로봇이 사람처럼 마우스를 '올려두고 유지하며(Hover)' 3단 콤보를 밟아 들어갑니다.")
     
     test_url = st.text_input("타겟 URL (고정)", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
     
@@ -561,7 +561,6 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 st.write("⏳ 로딩 화면이 완전히 사라질 때까지 충분히 대기합니다 (15초)...")
                 time.sleep(15) 
                 
-                # 🌟 무적 패치 1: 팝업 파괴자 투입
                 st.write("🛡️ 화면을 가리는 방해물(팝업) 강제 철거 중...")
                 js_close_popup = """
                 var pop_btns = document.querySelectorAll('a, button, span, div, img');
@@ -589,81 +588,71 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 return closed;
                 """
                 try:
-                    is_closed = driver.execute_script(js_close_popup)
-                    time.sleep(2) # 팝업 닫히는 애니메이션 대기
-                    if is_closed: st.write("✔️ 팝업 창을 성공적으로 닫았습니다!")
+                    driver.execute_script(js_close_popup)
+                    time.sleep(2) 
                 except:
                     pass
                 
                 st.write("📸 1. 팝업 제거 후 메인 화면 확보 중...")
-                st.image(driver.get_screenshot_as_png(), caption="1. 거대한 팝업창이 사라지고 메뉴가 잘 보이는지 확인하세요!")
+                st.image(driver.get_screenshot_as_png(), caption="1. 팝업창이 성공적으로 파괴된 메인 화면입니다.")
                 
-                # 🌟 무적 패치 2: 사용자 제보 기반 3단 콤보 (입찰공고 -> 입찰공고 -> 입찰공고조회)
-                st.write("🖱️ 대표님 제보 기반: 3단 콤보 정밀 타격 시도 중...")
+                # 🌟 핵심 무적 패치: 'ActionChains'를 이용한 사람과 완벽하게 똑같은 Hover 조작
+                st.write("🖱️ 대표님의 제보를 바탕으로, 마우스를 올리고 기다리는(Hover) 3단 콤보를 시도합니다...")
                 
                 combo_msg = "실패"
-                frames = [None] + driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
+                driver.switch_to.default_content() # 메뉴바는 최상단 프레임에 있으므로 기본 프레임 유지
                 
-                for idx, frame in enumerate(frames):
-                    try:
-                        if frame: driver.switch_to.frame(frame)
-                        
-                        # 1단계: '입찰공고' 클릭
-                        step1_js = """
-                        var els = document.querySelectorAll('a, span');
-                        for(var i=0; i<els.length; i++) {
-                            if(els[i].innerText && els[i].innerText.trim() === '입찰공고' && els[i].offsetWidth > 0) {
-                                els[i].click(); return true;
-                            }
-                        } return false;
-                        """
-                        if driver.execute_script(step1_js):
-                            time.sleep(2) # 드롭다운 열림 대기
+                try:
+                    # 1단계: '입찰공고' (메인 탭) 찾아서 마우스 올리기
+                    top_menus = driver.find_elements(By.XPATH, "//a[contains(text(), '입찰공고')] | //span[contains(text(), '입찰공고')]")
+                    top_menu = None
+                    for tm in top_menus:
+                        if tm.is_displayed() and tm.size['height'] > 0:
+                            top_menu = tm
+                            break
                             
-                            # 2단계: 다시 보이는 '입찰공고'에 마우스 호버(Hover)
-                            step2_elems = driver.find_elements(By.XPATH, "//*[text()='입찰공고' or contains(text(), '입찰공고')]")
-                            for el in step2_elems:
-                                if el.is_displayed():
-                                    try:
-                                        ActionChains(driver).move_to_element(el).perform()
-                                        time.sleep(1) # 3단계 플라이아웃 열림 대기
-                                    except: pass
-                                    
-                            # 3단계: 최종 목적지 '입찰공고조회' 강제 타격
-                            step3_js = """
-                            var els = document.querySelectorAll('a, span, li, button');
-                            for(var i=0; i<els.length; i++) {
-                                var txt = els[i].textContent || els[i].innerText;
-                                if(txt && txt.replace(/\\s/g, '').indexOf('입찰공고조회') > -1) {
-                                    var target = els[i];
-                                    if(target.tagName !== 'A' && target.closest('a')) target = target.closest('a');
-                                    
-                                    var href = target.getAttribute('href');
-                                    if(href && href !== '#' && href.indexOf('javascript:') === -1) {
-                                        window.location.href = href; return 'HREF_REDIRECT';
-                                    }
-                                    target.click(); return 'CLICKED_DIRECTLY';
-                                }
-                            } return 'NOT_FOUND';
-                            """
-                            res = driver.execute_script(step3_js)
-                            if res != 'NOT_FOUND':
-                                combo_msg = res
-                                driver.switch_to.default_content()
+                    if top_menu:
+                        st.write("➡️ 1단계: 최상단 '입찰공고'에 마우스 올리고 대기 중...")
+                        ActionChains(driver).move_to_element(top_menu).perform()
+                        time.sleep(2) # 하위 메뉴가 스르륵 내려올 때까지 기다림
+                        
+                        # 2단계: 드롭다운 안의 '입찰공고' 찾아서 마우스 옮기기
+                        mid_menus = driver.find_elements(By.XPATH, "//a[contains(text(), '입찰공고')] | //span[contains(text(), '입찰공고')]")
+                        mid_menu = None
+                        for mm in mid_menus:
+                            if mm.id != top_menu.id and mm.is_displayed():
+                                mid_menu = mm
                                 break
                                 
-                        driver.switch_to.default_content()
-                    except:
-                        driver.switch_to.default_content()
+                        if mid_menu:
+                            st.write("➡️ 2단계: 하위 메뉴 '입찰공고'로 마우스 이동 후 유지...")
+                            ActionChains(driver).move_to_element(mid_menu).perform()
+                            time.sleep(2) # 3단계 메뉴가 우측으로 펼쳐질 때까지 기다림
+                            
+                            # 3단계: 드디어 나타난 '입찰공고조회' 클릭
+                            final_menus = driver.find_elements(By.XPATH, "//*[contains(text(), '입찰공고조회')]")
+                            for fm in final_menus:
+                                if fm.is_displayed():
+                                    st.write("➡️ 3단계: 드디어 나타난 '입찰공고조회' 최종 타격!")
+                                    # 혹시 모를 빗나감 방지를 위해 자바스크립트로 강제 클릭을 병행
+                                    href = fm.get_attribute('href')
+                                    if href and 'javascript:' in href:
+                                        driver.execute_script(href.replace('javascript:', ''))
+                                    else:
+                                        driver.execute_script("arguments[0].click();", fm)
+                                    combo_msg = "성공"
+                                    break
+                except Exception as e:
+                    st.write(f"⚠️ 마우스 조작 중 오류 발생: {e}")
                 
                 if combo_msg != "실패":
-                    st.success(f"🎯 3단 콤보 타격 적중! ({combo_msg}) 표가 렌더링될 때까지 기다립니다...")
+                    st.success("🎯 3단 콤보 Hover 타격 적중! 표가 렌더링될 때까지 기다립니다...")
                     time.sleep(5)
                 else:
-                    st.warning("⚠️ 3단 콤보 타격에 실패했습니다. 팝업이 가리고 있거나 구조가 다릅니다.")
+                    st.warning("⚠️ 3단 콤보 타격에 실패했습니다. 팝업이 덜 닫혔거나 화면 밖으로 벗어났을 수 있습니다.")
                 
                 st.write("📸 2. 타격 성공(또는 대기) 후 진입한 화면 확보 중...")
-                st.image(driver.get_screenshot_as_png(), caption="2. 메뉴 클릭 후 진입한 화면 (입찰공고 표가 보이는지 확인하세요!)")
+                st.image(driver.get_screenshot_as_png(), caption="2. 메뉴 클릭 후 진입한 화면 (진짜 입찰공고 표가 보이는지 확인하세요!)")
                 
                 st.write("⏳ 내부 표(Table) 데이터 추출 중...")
                 
