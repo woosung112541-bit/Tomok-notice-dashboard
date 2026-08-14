@@ -511,11 +511,11 @@ elif menu == "📝 게시판 / 메모장":
         st.write("아직 등록된 메모가 없습니다.")
 
 # ==========================================
-# 6. 🧪 스텔스 테스트 랩 (한수원 엑스레이 및 딥다이브 패치)
+# 6. 🧪 스텔스 테스트 랩 (ActionChains 및 정보 스캔 탑재)
 # ==========================================
 elif menu == "🧪 스텔스 테스트 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
-    st.info("로봇이 직접 찍은 스크린샷(엑스레이)을 통해 사이트의 숨겨진 구조와 차단 원인을 시각적으로 분석합니다.")
+    st.info("가상 마우스를 이용해 드롭다운 메뉴를 물리적으로 조작하거나, 버튼에 숨겨진 비밀 코드(URL)를 훔쳐냅니다.")
     
     test_url = st.text_input("타겟 URL (고정)", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
     
@@ -529,6 +529,7 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 from selenium.webdriver.common.by import By
                 from selenium.webdriver.support.ui import WebDriverWait
                 from selenium.webdriver.support import expected_conditions as EC
+                from selenium.webdriver.common.action_chains import ActionChains
                 from webdriver_manager.chrome import ChromeDriverManager
                 from bs4 import BeautifulSoup
                 import time
@@ -554,68 +555,47 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 
                 st.write(f"🔗 {test_url} 접속 중...")
                 driver.get(test_url)
-                time.sleep(4) 
+                time.sleep(6) # 폰트 및 구조 로딩을 위한 충분한 대기
                 
-                # 📸 엑스레이 1: 진입 직후 화면
-                st.write("📸 로봇의 시야(엑스레이) 확보 중...")
-                st.image(driver.get_screenshot_as_png(), caption="1. 로봇 진입 직후 화면 (어떤 팝업이나 화면이 떴는지 확인하세요!)")
+                st.write("📸 1. 로봇 진입 직후 화면 확보 중...")
+                st.image(driver.get_screenshot_as_png(), caption="로봇의 첫 시야 (한글 폰트 적용 여부 확인)")
                 
-                st.write("🔎 뼈때리기(JS Click): 전체 프레임 관통 및 메뉴 강제 클릭 시도 중...")
-                
-                # 🌟 JS 뼈때리기 코드: 공백 무시하고 입찰공고조회 또는 입찰공고 타격
-                js_click_code = """
-                var clicked = false;
-                var els = document.querySelectorAll('a, span, div, li, button');
+                # 🌟 해킹 1: 버튼의 비밀 소스코드(HTML) 훔쳐오기
+                st.write("🔎 '입찰공고조회' 버튼의 숨겨진 소스코드 스캔 중...")
+                js_extract = """
+                var els = document.querySelectorAll('a, span, li');
                 for(var i=0; i<els.length; i++) {
-                    var txt = els[i].textContent || els[i].innerText;
-                    if(txt && txt.replace(/\s/g, '').indexOf('입찰공고조회') > -1) {
-                        els[i].click();
-                        return true;
+                    if(els[i].textContent.replace(/\\s/g, '').indexOf('입찰공고조회') > -1) {
+                        var target = els[i];
+                        if(target.tagName !== 'A' && target.closest('a')) target = target.closest('a');
+                        return target.outerHTML;
                     }
                 }
-                for(var i=0; i<els.length; i++) {
-                    var txt = els[i].textContent || els[i].innerText;
-                    if(txt && txt.trim() === '입찰공고') {
-                        els[i].click();
-                        return true;
-                    }
-                }
-                return false;
+                return '해당 글자를 포함하는 요소를 찾을 수 없습니다.';
                 """
+                target_html = driver.execute_script(js_extract)
+                st.code(f"발견된 버튼 코드:\n{target_html}", language="html")
                 
-                clicked = False
-                # 1. 메인 프레임 뼈때리기
+                # 🌟 해킹 2: 가상 마우스를 이용한 물리적 호버(Hover) 및 클릭
+                st.write("🖱️ 가상 마우스를 이용한 강제 호버 및 클릭 시도 중...")
                 try:
-                    if driver.execute_script(js_click_code): clicked = True
-                except: pass
+                    # 1. '입찰공고' 글자에 마우스 올리기 (Hover)
+                    main_menu = driver.find_element(By.XPATH, "//*[contains(text(), '입찰공고')]")
+                    ActionChains(driver).move_to_element(main_menu).perform()
+                    time.sleep(2) # 메뉴가 펼쳐질 때까지 2초 대기
+                    
+                    # 2. 내려온 '입찰공고조회' 클릭하기
+                    sub_menu = driver.find_element(By.XPATH, "//*[contains(text(), '입찰공고조회')]")
+                    ActionChains(driver).move_to_element(sub_menu).click().perform()
+                    st.success("✅ 마우스 호버 및 클릭 성공! 화면 전환 대기 중...")
+                    time.sleep(5)
+                except Exception as click_e:
+                    st.warning(f"마우스 조작 실패: {click_e} (대신 소스코드를 분석하여 우회 URL을 만들 수 있습니다.)")
                 
-                # 2. 서브 프레임들(이중창) 뼈때리기
-                if not clicked:
-                    frames = driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
-                    for i in range(len(frames)):
-                        try:
-                            driver.switch_to.frame(i)
-                            if driver.execute_script(js_click_code):
-                                clicked = True
-                                driver.switch_to.default_content()
-                                break
-                            driver.switch_to.default_content()
-                        except:
-                            driver.switch_to.default_content()
+                st.write("📸 2. 마우스 클릭 직후 화면 확보 중...")
+                st.image(driver.get_screenshot_as_png(), caption="메뉴 클릭(Hover) 후의 화면")
                 
-                if clicked:
-                    st.success("🎯 메뉴 요소 강제 타격 성공! 화면 전환을 기다립니다...")
-                else:
-                    st.warning("⚠️ 지정된 텍스트를 찾지 못했습니다. 화면에 다른 팝업이 있는지 위의 스크린샷을 확인하세요.")
-                
-                time.sleep(5)
-                
-                # 📸 엑스레이 2: 클릭 후 화면
-                st.image(driver.get_screenshot_as_png(), caption="2. 메뉴 클릭(또는 대기) 후 화면")
-                
-                st.write("⏳ 내부 표(Table) 데이터 렌더링 검사 중...")
-                
-                # 🌟 표 추출 함수
+                # 표 추출 함수
                 def extract_table_data(d):
                     soup = BeautifulSoup(d.page_source, 'html.parser')
                     rows = soup.select("table tbody tr")
@@ -625,7 +605,7 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 
                 res_list = extract_table_data(driver)
                 
-                # 메인 화면에 없으면 프레임 내부까지 다시 싹 다 뒤지기
+                # 메인에 없으면 iframe 싹쓸이
                 if not res_list:
                     frames = driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
                     for i in range(len(frames)):
@@ -645,7 +625,7 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                     st.success(f"✅ 성공! 총 {len(res_list)}개의 공고 데이터를 끄집어냈습니다.")
                     st.code("\n".join(res_list))
                 else:
-                    st.error("데이터를 찾을 수 없습니다. 두 번째 스크린샷을 통해 로봇이 올바른 표 화면을 보고 있는지 확인해주세요.")
+                    st.error("데이터를 찾을 수 없습니다. 출력된 소스코드(HTML)를 분석해야 합니다.")
                 
             except Exception as e:
                 status.update(label="❌ 오류 발생", state="error", expanded=True)
