@@ -224,7 +224,7 @@ def render_notice_table(df, key_prefix):
 st.sidebar.title("📌 메뉴 선택")
 menu = st.sidebar.radio(
     "이동할 메뉴를 선택하세요:",
-    ["공고 자동수집", "공고 통계 및 분석", "🎯 타겟 공고 (내 업무)", "사이트 검토 필요(오류/개편)", "📝 게시판 / 메모장"]
+    ["공고 자동수집", "공고 통계 및 분석", "🎯 타겟 공고 (내 업무)", "사이트 검토 필요(오류/개편)", "📝 게시판 / 메모장", "🧪 스텔스 테스트 랩 (한수원)"]
 )
 st.sidebar.divider()
 
@@ -297,14 +297,11 @@ if menu == "공고 자동수집":
         search_keyword = st.sidebar.text_input("공고제목 / 특이사항 검색", "")
         search_org = st.sidebar.text_input("발주기관(출처) 검색", "")
         date_range = st.sidebar.date_input("등록일자 범위 지정", [])
-        
-        # 🌟 기본값을 True로 주어 대시보드 입장 시 즉각 깔끔한 화면을 제공합니다.
         hide_reviewed = st.sidebar.checkbox("✅ 검토 완료된 공고 숨기기", value=True)
 
         filtered_df = df.copy()
         
         if hide_reviewed:
-            # 🌟 '완료', '내업무아님', '내업무맞음' 세 가지 상태를 모두 싹 다 숨깁니다.
             filtered_df = filtered_df[~filtered_df['검토유무'].isin(['완료', '내업무아님', '내업무맞음'])]
             
         if search_keyword: 
@@ -512,3 +509,81 @@ elif menu == "📝 게시판 / 메모장":
         st.dataframe(df_memos, use_container_width=True)
     else:
         st.write("아직 등록된 메모가 없습니다.")
+
+# ==========================================
+# 6. 🧪 스텔스 테스트 랩 (한수원 우회 등)
+# ==========================================
+elif menu == "🧪 스텔스 테스트 랩 (한수원)":
+    st.title("🧪 스텔스 봇 침투 테스트 랩")
+    st.info("터미널 환경 없이, 웹 화면에서 직접 한수원(KHNP) 등 까다로운 사이트의 방어막 우회 테스트를 진행합니다.")
+    
+    test_url = st.text_input("타겟 URL (한수원 공개 입찰게시판 등)", value="https://ebiz.khnp.co.kr/login.do")
+    
+    if st.button("🚀 스텔스 침투 시작", type="primary"):
+        with st.status("서버에 스텔스 봇을 투입합니다...", expanded=True) as status:
+            st.write("🕵️ 브라우저 지문 위장 중...")
+            try:
+                from selenium import webdriver
+                from selenium.webdriver.chrome.service import Service
+                from selenium.webdriver.chrome.options import Options
+                from selenium.webdriver.common.by import By
+                from selenium.webdriver.support.ui import WebDriverWait
+                from selenium.webdriver.support import expected_conditions as EC
+                from webdriver_manager.chrome import ChromeDriverManager
+                from bs4 import BeautifulSoup
+                import time
+                
+                chrome_options = Options()
+                chrome_options.add_argument("--headless") 
+                chrome_options.add_argument("--no-sandbox")
+                chrome_options.add_argument("--disable-dev-shm-usage")
+                chrome_options.add_argument("--window-size=1920x1080")
+                chrome_options.add_argument("--disable-blink-features=AutomationControlled") 
+                chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                chrome_options.add_experimental_option('useAutomationExtension', False)
+                
+                try:
+                    service = Service('/usr/bin/chromedriver')
+                    driver = webdriver.Chrome(service=service, options=chrome_options)
+                except:
+                    service = Service(ChromeDriverManager().install())
+                    driver = webdriver.Chrome(service=service, options=chrome_options)
+                    
+                driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'})
+                driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                
+                st.write(f"🔗 {test_url} 접속 중...")
+                driver.get(test_url)
+                
+                st.write("⏳ 데이터 렌더링 대기 중 (최대 15초)...")
+                WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr")))
+                time.sleep(2)
+                
+                iframes = driver.find_elements(By.TAG_NAME, "iframe")
+                if len(iframes) > 0:
+                    st.write("🪟 iframe 감지! 내부 프레임으로 진입합니다.")
+                    driver.switch_to.frame(iframes[0])
+                    time.sleep(2)
+
+                soup = BeautifulSoup(driver.page_source, 'html.parser')
+                rows = soup.select("table tbody tr")
+                
+                st.write(f"✅ 성공! 총 {len(rows)}개의 공고 데이터를 발견했습니다.")
+                
+                res_list = []
+                for idx, row in enumerate(rows[:10]):
+                    res_list.append(f"[{idx+1}] " + row.get_text(separator=' | ', strip=True))
+                    
+                status.update(label="✅ 침투 및 추출 완료!", state="complete", expanded=True)
+                
+                if res_list:
+                    st.code("\n".join(res_list))
+                else:
+                    st.warning("표 형태(table)의 데이터가 발견되지 않았습니다. URL을 확인해 주세요.")
+                
+            except Exception as e:
+                status.update(label="❌ 오류 발생", state="error", expanded=True)
+                st.error(f"오류 상세 내용: {e}")
+            finally:
+                if 'driver' in locals() and driver is not None:
+                    driver.quit()
