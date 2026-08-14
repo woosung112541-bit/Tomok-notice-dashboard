@@ -511,11 +511,11 @@ elif menu == "📝 게시판 / 메모장":
         st.write("아직 등록된 메모가 없습니다.")
 
 # ==========================================
-# 6. 🧪 스텔스 테스트 랩 (한국어 강제 위장 + 스크립트 훔치기 완결판)
+# 6. 🧪 스텔스 테스트 랩 (팝업 파괴 및 메뉴 정밀 타격 완결판)
 # ==========================================
 elif menu == "🧪 스텔스 테스트 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
-    st.info("로봇을 완벽한 한국인으로 위장시켜 메뉴를 띄우고, 버튼 속의 코드를 가로채 직접 실행시킵니다.")
+    st.info("접속 즉시 방해물(팝업)을 닫아버리고, 한국어 메뉴를 순서대로 클릭하여 데이터를 가져옵니다.")
     
     test_url = st.text_input("타겟 URL (고정)", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
     
@@ -539,7 +539,6 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 chrome_options.add_argument("--disable-blink-features=AutomationControlled") 
                 chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
                 chrome_options.add_experimental_option('useAutomationExtension', False)
-                # 🌟 핵심 1: 브라우저 자체 언어를 한국어로 설정
                 chrome_options.add_argument("--lang=ko-KR")
                 
                 try:
@@ -549,7 +548,6 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                     service = Service(ChromeDriverManager().install())
                     driver = webdriver.Chrome(service=service, options=chrome_options)
                 
-                # 🌟 핵심 2: 사이트 서버에 요청할 때 "나 한국인이야!" 라고 헤더 속이기
                 driver.execute_cdp_cmd('Network.setUserAgentOverride', {
                     "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
                     "acceptLanguage": 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
@@ -559,17 +557,62 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 st.write(f"🔗 {test_url} 접속 중...")
                 driver.get(test_url)
                 
-                st.write("⏳ 'HOME 0%' 로딩 화면이 완전히 사라질 때까지 충분히 대기합니다 (15초)...")
+                st.write("⏳ 로딩 화면이 완전히 사라질 때까지 충분히 대기합니다 (15초)...")
                 time.sleep(15) 
                 
-                st.write("📸 1. 로딩 완료 후 메인 화면 확보 중...")
-                st.image(driver.get_screenshot_as_png(), caption="1. 이제 한국어 메뉴가 잘 보이는지 확인하세요!")
+                # 🌟 무적 패치 1: 팝업 파괴자 (Popup Killer) 투입
+                st.write("🛡️ 화면을 가리는 방해물(팝업) 강제 철거 중...")
+                js_close_popup = """
+                var pop_btns = document.querySelectorAll('a, button, span, div, img');
+                var closed = false;
+                for(var i=0; i<pop_btns.length; i++) {
+                    var txt = pop_btns[i].textContent || pop_btns[i].innerText;
+                    var alt = pop_btns[i].getAttribute('alt');
+                    if(txt) {
+                        txt = txt.trim();
+                        if(txt === '닫기' || txt === '하루동안 열지 않기' || txt === '오늘 하루 이 창을 열지 않음' || txt === 'X') {
+                            pop_btns[i].click();
+                            closed = true;
+                        }
+                    }
+                    if(alt && (alt === '닫기' || alt === 'close')) {
+                        pop_btns[i].click();
+                        closed = true;
+                    }
+                }
+                var close_icons = document.querySelectorAll('.close, .btn_close');
+                for(var j=0; j<close_icons.length; j++) {
+                    close_icons[j].click();
+                    closed = true;
+                }
+                return closed;
+                """
+                try:
+                    is_closed = driver.execute_script(js_close_popup)
+                    time.sleep(2) # 팝업 닫히는 애니메이션 대기
+                    if is_closed: st.write("✔️ 팝업 창을 성공적으로 닫았습니다!")
+                except:
+                    pass
                 
-                st.write("🖱️ 자바스크립트 엑스레이 타격(JS Force Execute) 시도 중...")
+                st.write("📸 1. 팝업 제거 후 메인 화면 확보 중...")
+                st.image(driver.get_screenshot_as_png(), caption="1. 거대한 팝업창이 사라지고 메뉴가 잘 보이는지 확인하세요!")
                 
-                # 🌟 핵심 3: 클릭이 안 먹히면, 버튼 속의 JS 코드를 훔쳐서 뇌에 직접 꽂아버립니다.
-                js_click_sub = """
-                var result = 'NOT_FOUND';
+                st.write("🖱️ 자바스크립트 정밀 2단 타격 시도 중...")
+                
+                # 🌟 무적 패치 2: 1단계 '입찰공고' 열기 -> 2단계 '입찰공고조회' 누르기
+                js_click_main_menu = """
+                var els = document.querySelectorAll('a, span');
+                for(var i=0; i<els.length; i++) {
+                    var txt = els[i].textContent || els[i].innerText;
+                    if(txt && txt.trim() === '입찰공고') {
+                        els[i].click();
+                        return true;
+                    }
+                }
+                return false;
+                """
+                
+                js_click_sub_menu = """
                 var els = document.querySelectorAll('a, span, li, button');
                 for(var i=0; i<els.length; i++) {
                     var txt = els[i].textContent || els[i].innerText;
@@ -578,39 +621,37 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                         if(el.tagName !== 'A' && el.closest('a')) el = el.closest('a');
                         
                         var onclick = el.getAttribute('onclick');
-                        if(onclick) { eval(onclick); return 'ONCLICK_EXECUTED: ' + onclick; }
+                        if(onclick) { eval(onclick); return 'ONCLICK_EXECUTED'; }
                         
                         var href = el.getAttribute('href');
-                        if(href && href.indexOf('javascript:') === 0) { eval(href.replace('javascript:', '')); return 'HREF_JS_EXECUTED: ' + href; }
-                        if(href && href !== '#' && href !== '') { window.location.href = href; return 'HREF_REDIRECTED: ' + href; }
+                        if(href && href.indexOf('javascript:') === 0) { eval(href.replace('javascript:', '')); return 'HREF_JS_EXECUTED'; }
                         
                         el.click();
                         return 'CLICKED_DIRECTLY';
                     }
                 }
-                
-                // 대안: 중앙의 더보기(+) 버튼 찾아서 타격
-                var plus_btns = document.querySelectorAll('a[title*="더보기"], a.plus, a.btn_more');
-                if(plus_btns.length > 0) {
-                    var el = plus_btns[0];
-                    var onclick = el.getAttribute('onclick');
-                    if(onclick) { eval(onclick); return 'PLUS_ONCLICK_EXECUTED'; }
-                    var href = el.getAttribute('href');
-                    if(href && href.indexOf('javascript:') === 0) { eval(href.replace('javascript:', '')); return 'PLUS_HREF_JS_EXECUTED'; }
-                    el.click();
-                    return 'PLUS_CLICKED';
-                }
-                
-                return result;
+                return 'NOT_FOUND';
                 """
                 
                 frames = [None] + driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
                 
+                # [1단계] 메인 탭(입찰공고) 찌르기
+                for idx, frame in enumerate(frames):
+                    try:
+                        if frame: driver.switch_to.frame(frame)
+                        driver.execute_script(js_click_main_menu)
+                        driver.switch_to.default_content()
+                    except:
+                        driver.switch_to.default_content()
+                
+                time.sleep(2) # 하위 메뉴 열릴 시간
+                
+                # [2단계] 서브 탭(입찰공고조회) 찌르기
                 clicked_msg = "실패"
                 for idx, frame in enumerate(frames):
                     try:
                         if frame: driver.switch_to.frame(frame)
-                        res = driver.execute_script(js_click_sub)
+                        res = driver.execute_script(js_click_sub_menu)
                         if res != 'NOT_FOUND':
                             clicked_msg = res
                             driver.switch_to.default_content()
@@ -620,13 +661,13 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                         driver.switch_to.default_content()
                 
                 if clicked_msg != "실패":
-                    st.success(f"🎯 뼈때리기 적중! ({clicked_msg}) 화면이 전환될 때까지 기다립니다...")
+                    st.success(f"🎯 입찰공고조회 타격 적중! ({clicked_msg}) 표가 렌더링될 때까지 기다립니다...")
                     time.sleep(5)
                 else:
-                    st.warning("⚠️ 요소를 찾지 못했습니다. DOM 구조가 예상과 다릅니다.")
+                    st.warning("⚠️ 입찰공고조회 메뉴를 누르지 못했습니다. 팝업이 아직 안 닫혔을 수 있습니다.")
                 
                 st.write("📸 2. 타격 성공(또는 대기) 후 진입한 화면 확보 중...")
-                st.image(driver.get_screenshot_as_png(), caption="2. 강제 타격 후 진입한 화면")
+                st.image(driver.get_screenshot_as_png(), caption="2. 메뉴 클릭 후 진입한 화면 (입찰공고 표가 보이는지 확인하세요!)")
                 
                 st.write("⏳ 내부 표(Table) 데이터 추출 중...")
                 
@@ -634,7 +675,15 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                     soup = BeautifulSoup(d.page_source, 'html.parser')
                     rows = soup.select("table tbody tr")
                     if len(rows) > 0:
-                        return [f"[{idx+1}] " + r.get_text(separator=' | ', strip=True) for idx, r in enumerate(rows[:10])]
+                        # 로그인 폼 테이블(인증서 등)을 걸러내고 진짜 입찰 표만 추출
+                        valid_rows = []
+                        for r in rows:
+                            text = r.get_text(separator=' | ', strip=True)
+                            if '인증서' not in text and '비밀번호' not in text and len(text) > 20:
+                                valid_rows.append(text)
+                        
+                        if valid_rows:
+                            return [f"[{idx+1}] " + txt for idx, txt in enumerate(valid_rows[:10])]
                     return None
                 
                 res_list = extract_table_data(driver)
@@ -659,7 +708,7 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                     st.success(f"✅ 성공! 총 {len(res_list)}개의 공고 데이터를 끄집어냈습니다.")
                     st.code("\n".join(res_list))
                 else:
-                    st.error("데이터를 찾을 수 없습니다. 출력된 두 번째 스크린샷에 표가 보이는지 확인해주세요.")
+                    st.error("데이터를 찾을 수 없습니다. 출력된 두 번째 스크린샷에 진짜 표가 보이는지 확인해주세요.")
                 
             except Exception as e:
                 status.update(label="❌ 오류 발생", state="error", expanded=True)
