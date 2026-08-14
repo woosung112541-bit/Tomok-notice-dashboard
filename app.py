@@ -511,11 +511,11 @@ elif menu == "📝 게시판 / 메모장":
         st.write("아직 등록된 메모가 없습니다.")
 
 # ==========================================
-# 6. 🧪 스텔스 테스트 랩 (가짜 데이터 필터링 완벽 적용본)
+# 6. 🧪 스텔스 테스트 랩 (기업용 그리드 표 완전 파괴 추출판)
 # ==========================================
 elif menu == "🧪 스텔스 테스트 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
-    st.info("표가 렌더링될 때 검색 필터 껍데기에 속지 않고 진짜 데이터가 나올 때까지 끈질기게 감시합니다.")
+    st.info("숨겨진 기업용 그리드 구조의 표를 완벽하게 파악하여 긁어옵니다.")
     
     test_url = st.text_input("타겟 URL (고정)", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
     
@@ -647,7 +647,27 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 else:
                     st.warning("⚠️ 지름길 버튼(+)과 메뉴를 모두 찾지 못했습니다.")
                 
-                # 🌟 핵심 패치: 가짜 데이터(검색 필터 헤더)를 거르고 진짜 데이터만 기다리도록 필터링 강화
+                # 🌟 추출 함수 완벽 진화: tbody 구애받지 않고, 열(td)이 많은 모든 표의 행(tr)을 뒤집니다!
+                def extract_table_data(d):
+                    soup = BeautifulSoup(d.page_source, 'html.parser')
+                    # 특정 껍데기(tbody)에 구애받지 않고 화면 안의 모든 줄(tr)을 싹 다 가져옵니다.
+                    rows = soup.find_all("tr")
+                    valid_rows = []
+                    
+                    for r in rows:
+                        cells = r.find_all(['td', 'th'])
+                        # 사진을 보면 실제 데이터 표는 가로 칸(컬럼)이 10개가 넘어갑니다. (최소 6개 이상만 취급)
+                        if len(cells) >= 6:
+                            text = r.get_text(separator=' | ', strip=True)
+                            # 헤더(제목 줄), 검색 폼, 에러 메시지 텍스트는 걸러냅니다.
+                            if '결과상태' not in text and '구매운영단위' not in text and '조회된 데이터가 없습니다' not in text and '인증서' not in text:
+                                if len(text) > 15: # 너무 짧은 공백 줄도 버림
+                                    valid_rows.append(text)
+                                    
+                    if len(valid_rows) > 0:
+                        return [f"[{idx+1}] " + txt for idx, txt in enumerate(valid_rows[:15])]
+                    return None
+
                 st.write("⏳ 로딩 스피너(동그라미) 대기 및 진짜 데이터 추출 진행 중 (최대 20초)...")
                 
                 res_list = None
@@ -657,36 +677,20 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                     time.sleep(1)
                     frames = [None] + driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
                     
-                    found_valid_data = False
                     for frame in frames:
                         try:
                             if frame: driver.switch_to.frame(frame)
-                            soup = BeautifulSoup(driver.page_source, 'html.parser')
-                            rows = soup.select("table tbody tr")
-                            
-                            valid_rows = []
-                            # 가짜 데이터 필터링 조건 추가
-                            ignore_words = ['인증서', '비밀번호', '조회된 데이터가 없습니다', '표시할 데이터가 없습니다', '구매운영단위', '결과상태', '공고일자']
-                            
-                            for r in rows:
-                                text = r.get_text(separator=' | ', strip=True)
-                                # 쓰레기 텍스트(검색 폼, 에러 메시지)가 포함되지 않고 길이가 긴 텍스트만 진짜로 취급
-                                if not any(word in text for word in ignore_words) and len(text) > 20:
-                                    valid_rows.append(text)
-                            
-                            if len(valid_rows) > 0:
-                                res_list = [f"[{i+1}] " + txt for i, txt in enumerate(valid_rows[:15])]
-                                found_valid_data = True
+                            res_list = extract_table_data(driver)
+                            if res_list:
                                 driver.switch_to.default_content()
                                 break
                             driver.switch_to.default_content()
                         except:
                             driver.switch_to.default_content()
                     
-                    if found_valid_data:
-                        break # 진짜 데이터를 찾았으면 20초를 안 기다리고 즉시 탈출!
+                    if res_list:
+                        break # 진짜 데이터가 수집되었으면 스피너 무시하고 즉각 탈출!
                         
-                    # 7초가 지났는데도 스피너가 안 멈추거나 데이터가 없으면 '검색' 버튼 강제 클릭!
                     if attempt == 7 and not search_clicked:
                         st.write("🔄 자동 조회가 지연되어 '검색' 버튼을 강제 클릭합니다...")
                         js_search_click = """
