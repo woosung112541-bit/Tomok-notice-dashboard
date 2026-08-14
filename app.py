@@ -511,17 +511,17 @@ elif menu == "📝 게시판 / 메모장":
         st.write("아직 등록된 메모가 없습니다.")
 
 # ==========================================
-# 6. 🧪 스텔스 테스트 랩 (마우스 조작 포기 -> JS 무적 뼈때리기 패치)
+# 6. 🧪 스텔스 테스트 랩 (한국어 강제 위장 + 스크립트 훔치기 완결판)
 # ==========================================
 elif menu == "🧪 스텔스 테스트 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
-    st.info("어설픈 마우스 동작 대신, 자바스크립트로 화면(프레임) 전체를 뒤져 버튼에 직접 클릭 신호를 강제로 꽂아 넣습니다.")
+    st.info("로봇을 완벽한 한국인으로 위장시켜 메뉴를 띄우고, 버튼 속의 코드를 가로채 직접 실행시킵니다.")
     
     test_url = st.text_input("타겟 URL (고정)", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
     
     if st.button("🚀 스텔스 침투 및 엑스레이 촬영 시작", type="primary"):
         with st.status("서버에 스텔스 봇을 투입합니다...", expanded=True) as status:
-            st.write("🕵️ 브라우저 지문 위장 중...")
+            st.write("🕵️ 브라우저 지문 위장 및 '한국어(ko-KR)' 강제 세팅 중...")
             try:
                 from selenium import webdriver
                 from selenium.webdriver.chrome.service import Service
@@ -539,6 +539,8 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 chrome_options.add_argument("--disable-blink-features=AutomationControlled") 
                 chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
                 chrome_options.add_experimental_option('useAutomationExtension', False)
+                # 🌟 핵심 1: 브라우저 자체 언어를 한국어로 설정
+                chrome_options.add_argument("--lang=ko-KR")
                 
                 try:
                     service = Service('/usr/bin/chromedriver')
@@ -546,8 +548,12 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 except:
                     service = Service(ChromeDriverManager().install())
                     driver = webdriver.Chrome(service=service, options=chrome_options)
-                    
-                driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'})
+                
+                # 🌟 핵심 2: 사이트 서버에 요청할 때 "나 한국인이야!" 라고 헤더 속이기
+                driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+                    "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
+                    "acceptLanguage": 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
+                })
                 driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
                 
                 st.write(f"🔗 {test_url} 접속 중...")
@@ -557,63 +563,64 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 time.sleep(15) 
                 
                 st.write("📸 1. 로딩 완료 후 메인 화면 확보 중...")
-                st.image(driver.get_screenshot_as_png(), caption="1. 로딩 완료 직후의 첫 시야")
+                st.image(driver.get_screenshot_as_png(), caption="1. 이제 한국어 메뉴가 잘 보이는지 확인하세요!")
                 
-                # 🌟 무적의 패치: 자바스크립트를 이용해 숨겨진 요소라도 무조건 강제 타격합니다.
-                st.write("🖱️ 자바스크립트 엑스레이 타격(JS Force Click) 시도 중...")
+                st.write("🖱️ 자바스크립트 엑스레이 타격(JS Force Execute) 시도 중...")
                 
-                js_click_main = """
-                var els = document.querySelectorAll('a, span, div');
-                for(var i=0; i<els.length; i++) {
-                    var txt = els[i].textContent || els[i].innerText;
-                    if(txt && txt.trim() === '입찰공고') {
-                        els[i].click();
-                    }
-                }
-                """
-                
+                # 🌟 핵심 3: 클릭이 안 먹히면, 버튼 속의 JS 코드를 훔쳐서 뇌에 직접 꽂아버립니다.
                 js_click_sub = """
+                var result = 'NOT_FOUND';
                 var els = document.querySelectorAll('a, span, li, button');
                 for(var i=0; i<els.length; i++) {
                     var txt = els[i].textContent || els[i].innerText;
                     if(txt && txt.replace(/\\s/g, '').indexOf('입찰공고조회') > -1) {
-                        els[i].click();
-                        return 'CLICKED';
+                        var el = els[i];
+                        if(el.tagName !== 'A' && el.closest('a')) el = el.closest('a');
+                        
+                        var onclick = el.getAttribute('onclick');
+                        if(onclick) { eval(onclick); return 'ONCLICK_EXECUTED: ' + onclick; }
+                        
+                        var href = el.getAttribute('href');
+                        if(href && href.indexOf('javascript:') === 0) { eval(href.replace('javascript:', '')); return 'HREF_JS_EXECUTED: ' + href; }
+                        if(href && href !== '#' && href !== '') { window.location.href = href; return 'HREF_REDIRECTED: ' + href; }
+                        
+                        el.click();
+                        return 'CLICKED_DIRECTLY';
                     }
                 }
-                return 'NOT_FOUND';
+                
+                // 대안: 중앙의 더보기(+) 버튼 찾아서 타격
+                var plus_btns = document.querySelectorAll('a[title*="더보기"], a.plus, a.btn_more');
+                if(plus_btns.length > 0) {
+                    var el = plus_btns[0];
+                    var onclick = el.getAttribute('onclick');
+                    if(onclick) { eval(onclick); return 'PLUS_ONCLICK_EXECUTED'; }
+                    var href = el.getAttribute('href');
+                    if(href && href.indexOf('javascript:') === 0) { eval(href.replace('javascript:', '')); return 'PLUS_HREF_JS_EXECUTED'; }
+                    el.click();
+                    return 'PLUS_CLICKED';
+                }
+                
+                return result;
                 """
                 
-                # 프레임 구조까지 싸그리 관통하기 위해 리스트화
                 frames = [None] + driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
                 
-                # [1단계] 먼저 '입찰공고' 라는 껍데기 메뉴를 모든 프레임에서 강제로 엽니다.
-                for idx, frame in enumerate(frames):
-                    try:
-                        if frame: driver.switch_to.frame(frame)
-                        driver.execute_script(js_click_main)
-                        driver.switch_to.default_content()
-                    except:
-                        driver.switch_to.default_content()
-                        
-                time.sleep(2) # 껍데기 열리는 애니메이션 대기
-                
-                # [2단계] 진짜 목적지 '입찰공고조회'를 찾아 모든 프레임에서 무조건 찌릅니다.
-                clicked = False
+                clicked_msg = "실패"
                 for idx, frame in enumerate(frames):
                     try:
                         if frame: driver.switch_to.frame(frame)
                         res = driver.execute_script(js_click_sub)
-                        if res == 'CLICKED':
-                            clicked = True
+                        if res != 'NOT_FOUND':
+                            clicked_msg = res
                             driver.switch_to.default_content()
                             break
                         driver.switch_to.default_content()
                     except:
                         driver.switch_to.default_content()
                 
-                if clicked:
-                    st.success("🎯 뼈때리기 적중! 화면이 전환될 때까지 기다립니다...")
+                if clicked_msg != "실패":
+                    st.success(f"🎯 뼈때리기 적중! ({clicked_msg}) 화면이 전환될 때까지 기다립니다...")
                     time.sleep(5)
                 else:
                     st.warning("⚠️ 요소를 찾지 못했습니다. DOM 구조가 예상과 다릅니다.")
