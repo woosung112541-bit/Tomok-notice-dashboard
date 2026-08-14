@@ -511,11 +511,11 @@ elif menu == "📝 게시판 / 메모장":
         st.write("아직 등록된 메모가 없습니다.")
 
 # ==========================================
-# 6. 🧪 스텔스 테스트 랩 (팝업 파괴 및 메뉴 정밀 타격 완결판)
+# 6. 🧪 스텔스 테스트 랩 (사용자 제보 3단 콤보 완결판)
 # ==========================================
 elif menu == "🧪 스텔스 테스트 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
-    st.info("접속 즉시 방해물(팝업)을 닫아버리고, 한국어 메뉴를 순서대로 클릭하여 데이터를 가져옵니다.")
+    st.info("대표님이 제보해주신 '입찰공고 -> 입찰공고 -> 입찰공고조회' 3단계 루트를 정확히 밟아 들어갑니다.")
     
     test_url = st.text_input("타겟 URL (고정)", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
     
@@ -527,6 +527,7 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 from selenium.webdriver.chrome.service import Service
                 from selenium.webdriver.chrome.options import Options
                 from selenium.webdriver.common.by import By
+                from selenium.webdriver.common.action_chains import ActionChains
                 from webdriver_manager.chrome import ChromeDriverManager
                 from bs4 import BeautifulSoup
                 import time
@@ -560,7 +561,7 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 st.write("⏳ 로딩 화면이 완전히 사라질 때까지 충분히 대기합니다 (15초)...")
                 time.sleep(15) 
                 
-                # 🌟 무적 패치 1: 팝업 파괴자 (Popup Killer) 투입
+                # 🌟 무적 패치 1: 팝업 파괴자 투입
                 st.write("🛡️ 화면을 가리는 방해물(팝업) 강제 철거 중...")
                 js_close_popup = """
                 var pop_btns = document.querySelectorAll('a, button, span, div, img');
@@ -597,74 +598,69 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 st.write("📸 1. 팝업 제거 후 메인 화면 확보 중...")
                 st.image(driver.get_screenshot_as_png(), caption="1. 거대한 팝업창이 사라지고 메뉴가 잘 보이는지 확인하세요!")
                 
-                st.write("🖱️ 자바스크립트 정밀 2단 타격 시도 중...")
+                # 🌟 무적 패치 2: 사용자 제보 기반 3단 콤보 (입찰공고 -> 입찰공고 -> 입찰공고조회)
+                st.write("🖱️ 대표님 제보 기반: 3단 콤보 정밀 타격 시도 중...")
                 
-                # 🌟 무적 패치 2: 1단계 '입찰공고' 열기 -> 2단계 '입찰공고조회' 누르기
-                js_click_main_menu = """
-                var els = document.querySelectorAll('a, span');
-                for(var i=0; i<els.length; i++) {
-                    var txt = els[i].textContent || els[i].innerText;
-                    if(txt && txt.trim() === '입찰공고') {
-                        els[i].click();
-                        return true;
-                    }
-                }
-                return false;
-                """
-                
-                js_click_sub_menu = """
-                var els = document.querySelectorAll('a, span, li, button');
-                for(var i=0; i<els.length; i++) {
-                    var txt = els[i].textContent || els[i].innerText;
-                    if(txt && txt.replace(/\\s/g, '').indexOf('입찰공고조회') > -1) {
-                        var el = els[i];
-                        if(el.tagName !== 'A' && el.closest('a')) el = el.closest('a');
-                        
-                        var onclick = el.getAttribute('onclick');
-                        if(onclick) { eval(onclick); return 'ONCLICK_EXECUTED'; }
-                        
-                        var href = el.getAttribute('href');
-                        if(href && href.indexOf('javascript:') === 0) { eval(href.replace('javascript:', '')); return 'HREF_JS_EXECUTED'; }
-                        
-                        el.click();
-                        return 'CLICKED_DIRECTLY';
-                    }
-                }
-                return 'NOT_FOUND';
-                """
-                
+                combo_msg = "실패"
                 frames = [None] + driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
                 
-                # [1단계] 메인 탭(입찰공고) 찌르기
                 for idx, frame in enumerate(frames):
                     try:
                         if frame: driver.switch_to.frame(frame)
-                        driver.execute_script(js_click_main_menu)
+                        
+                        # 1단계: '입찰공고' 클릭
+                        step1_js = """
+                        var els = document.querySelectorAll('a, span');
+                        for(var i=0; i<els.length; i++) {
+                            if(els[i].innerText && els[i].innerText.trim() === '입찰공고' && els[i].offsetWidth > 0) {
+                                els[i].click(); return true;
+                            }
+                        } return false;
+                        """
+                        if driver.execute_script(step1_js):
+                            time.sleep(2) # 드롭다운 열림 대기
+                            
+                            # 2단계: 다시 보이는 '입찰공고'에 마우스 호버(Hover)
+                            step2_elems = driver.find_elements(By.XPATH, "//*[text()='입찰공고' or contains(text(), '입찰공고')]")
+                            for el in step2_elems:
+                                if el.is_displayed():
+                                    try:
+                                        ActionChains(driver).move_to_element(el).perform()
+                                        time.sleep(1) # 3단계 플라이아웃 열림 대기
+                                    except: pass
+                                    
+                            # 3단계: 최종 목적지 '입찰공고조회' 강제 타격
+                            step3_js = """
+                            var els = document.querySelectorAll('a, span, li, button');
+                            for(var i=0; i<els.length; i++) {
+                                var txt = els[i].textContent || els[i].innerText;
+                                if(txt && txt.replace(/\\s/g, '').indexOf('입찰공고조회') > -1) {
+                                    var target = els[i];
+                                    if(target.tagName !== 'A' && target.closest('a')) target = target.closest('a');
+                                    
+                                    var href = target.getAttribute('href');
+                                    if(href && href !== '#' && href.indexOf('javascript:') === -1) {
+                                        window.location.href = href; return 'HREF_REDIRECT';
+                                    }
+                                    target.click(); return 'CLICKED_DIRECTLY';
+                                }
+                            } return 'NOT_FOUND';
+                            """
+                            res = driver.execute_script(step3_js)
+                            if res != 'NOT_FOUND':
+                                combo_msg = res
+                                driver.switch_to.default_content()
+                                break
+                                
                         driver.switch_to.default_content()
                     except:
                         driver.switch_to.default_content()
                 
-                time.sleep(2) # 하위 메뉴 열릴 시간
-                
-                # [2단계] 서브 탭(입찰공고조회) 찌르기
-                clicked_msg = "실패"
-                for idx, frame in enumerate(frames):
-                    try:
-                        if frame: driver.switch_to.frame(frame)
-                        res = driver.execute_script(js_click_sub_menu)
-                        if res != 'NOT_FOUND':
-                            clicked_msg = res
-                            driver.switch_to.default_content()
-                            break
-                        driver.switch_to.default_content()
-                    except:
-                        driver.switch_to.default_content()
-                
-                if clicked_msg != "실패":
-                    st.success(f"🎯 입찰공고조회 타격 적중! ({clicked_msg}) 표가 렌더링될 때까지 기다립니다...")
+                if combo_msg != "실패":
+                    st.success(f"🎯 3단 콤보 타격 적중! ({combo_msg}) 표가 렌더링될 때까지 기다립니다...")
                     time.sleep(5)
                 else:
-                    st.warning("⚠️ 입찰공고조회 메뉴를 누르지 못했습니다. 팝업이 아직 안 닫혔을 수 있습니다.")
+                    st.warning("⚠️ 3단 콤보 타격에 실패했습니다. 팝업이 가리고 있거나 구조가 다릅니다.")
                 
                 st.write("📸 2. 타격 성공(또는 대기) 후 진입한 화면 확보 중...")
                 st.image(driver.get_screenshot_as_png(), caption="2. 메뉴 클릭 후 진입한 화면 (입찰공고 표가 보이는지 확인하세요!)")
