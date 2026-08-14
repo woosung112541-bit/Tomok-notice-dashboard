@@ -511,11 +511,11 @@ elif menu == "📝 게시판 / 메모장":
         st.write("아직 등록된 메모가 없습니다.")
 
 # ==========================================
-# 6. 🧪 스텔스 테스트 랩 (TH 무시 및 텍스트 100% 필터링 완결판)
+# 6. 🧪 스텔스 테스트 랩 (바보 로직 삭제 및 순수 텍스트 필터링판)
 # ==========================================
 elif menu == "🧪 스텔스 테스트 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
-    st.info("순번 <th> 태그에 속지 않고, 오직 안에 적힌 '진짜 글자'만을 분석하여 빈틈없이 데이터를 수확합니다.")
+    st.info("태그(<th>) 검사라는 멍청한 로직을 버리고, 오직 눈에 보이는 진짜 글자 데이터만 수확합니다.")
     
     test_url = st.text_input("타겟 URL (고정)", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
     
@@ -647,23 +647,27 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 else:
                     st.warning("⚠️ 지름길 버튼(+)과 메뉴를 모두 찾지 못했습니다.")
                 
-                # 🌟 추출 함수 최종 진화: TH 태그 무시하고 오직 내부 텍스트만으로 유효성 검사!
+                # 🌟 최종 완결판 추출 함수: HTML 태그(TH, TD) 무관! 오직 텍스트 내용으로만 100% 필터링!
                 def extract_table_data(d):
                     soup = BeautifulSoup(d.page_source, 'html.parser')
+                    # DOM 내의 모든 row를 긁어옵니다.
                     rows = soup.find_all("tr")
                     valid_rows = []
                     
-                    # 제목(머리글) 및 에러 메시지에 포함된 단어들
+                    # 절대 공고 내용일 수 없는 제목/안내문/껍데기 단어들
                     ignore_words = ['인증서', '비밀번호', '조회된 데이터가 없습니다', '표시할 데이터가 없습니다', 
-                                    '구매운영단위', '결과상태', '입찰방식', '공고일자']
+                                    '구매운영단위', '결과상태', '입찰방식', '공고일자', '공고차수', '정정/취소사유']
                     
                     for r in rows:
+                        # 1. 일단 줄 안의 텍스트를 파이프(|)로 이어서 뽑아봅니다.
                         text = r.get_text(separator=' | ', strip=True)
-                        # 조건: 길이가 20자 이상이고, 쪼개진 칸(|)이 3개 이상이며, 제목 단어가 전혀 없는 경우
+                        
+                        # 2. 텍스트가 20자 이상이고, 칸이 최소 4개(파이프 3개) 이상 나뉘어져 있으며
+                        # 3. 껍데기 단어(ignore_words)가 하나도 포함되어 있지 않다면 = 100% 진짜 데이터!
                         if len(text) > 20 and text.count('|') >= 3 and not any(word in text for word in ignore_words):
                             valid_rows.append(text)
                             
-                    # 중복 제거
+                    # 리스트 중복 제거 (그리드 특성상 똑같은 줄이 두 번 잡힐 수 있음)
                     seen = set()
                     unique_rows = []
                     for x in valid_rows:
