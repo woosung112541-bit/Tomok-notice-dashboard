@@ -511,15 +511,15 @@ elif menu == "📝 게시판 / 메모장":
         st.write("아직 등록된 메모가 없습니다.")
 
 # ==========================================
-# 6. 🧪 스텔스 테스트 랩 (한수원 우회 등)
+# 6. 🧪 스텔스 테스트 랩 (한수원 우회 강제 클릭 패치)
 # ==========================================
 elif menu == "🧪 스텔스 테스트 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
-    st.info("터미널 환경 없이, 웹 화면에서 직접 한수원(KHNP) 등 까다로운 사이트의 방어막 우회 테스트를 진행합니다.")
+    st.info("단일 페이지(SPA) 구조로 된 한수원(KHNP) 사이트에 접속 후, 로봇이 직접 메뉴를 클릭하여 공고를 가져옵니다.")
     
-    test_url = st.text_input("타겟 URL (한수원 공개 입찰게시판 등)", value="https://ebiz.khnp.co.kr/login.do")
+    test_url = st.text_input("타겟 URL (고정)", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
     
-    if st.button("🚀 스텔스 침투 시작", type="primary"):
+    if st.button("🚀 스텔스 침투 및 강제 클릭 시작", type="primary"):
         with st.status("서버에 스텔스 봇을 투입합니다...", expanded=True) as status:
             st.write("🕵️ 브라우저 지문 위장 중...")
             try:
@@ -555,20 +555,29 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 st.write(f"🔗 {test_url} 접속 중...")
                 driver.get(test_url)
                 
-                st.write("⏳ 데이터 렌더링 대기 중 (최대 15초)...")
-                WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr")))
-                time.sleep(2)
+                st.write("🖱️ '입찰공고' 메뉴 탐색 및 자동 클릭 시도 중...")
+                # 🌟 핵심: '입찰공고' 라는 글자가 있는 버튼이나 탭을 찾아서 클릭합니다.
+                menu_btn = WebDriverWait(driver, 15).until(
+                    EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), '입찰공고')] | //span[contains(text(), '입찰공고')]"))
+                )
+                driver.execute_script("arguments[0].click();", menu_btn)
+                time.sleep(3) # 클릭 후 화면 전환(애니메이션) 대기
                 
+                st.write("⏳ 클릭 후 내부 컴포넌트(데이터) 렌더링 대기 중...")
+                
+                # 내부 화면이 iframe으로 뜰 수 있으므로 프레임 검사
                 iframes = driver.find_elements(By.TAG_NAME, "iframe")
                 if len(iframes) > 0:
-                    st.write("🪟 iframe 감지! 내부 프레임으로 진입합니다.")
+                    st.write("🪟 내부 iframe 프레임으로 진입합니다.")
                     driver.switch_to.frame(iframes[0])
                     time.sleep(2)
 
+                WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr")))
+                
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
                 rows = soup.select("table tbody tr")
                 
-                st.write(f"✅ 성공! 총 {len(rows)}개의 공고 데이터를 발견했습니다.")
+                st.write(f"✅ 성공! 클릭하여 총 {len(rows)}개의 공고 데이터를 끄집어냈습니다.")
                 
                 res_list = []
                 for idx, row in enumerate(rows[:10]):
@@ -579,7 +588,7 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 if res_list:
                     st.code("\n".join(res_list))
                 else:
-                    st.warning("표 형태(table)의 데이터가 발견되지 않았습니다. URL을 확인해 주세요.")
+                    st.warning("데이터가 발견되지 않았습니다. DOM 구조를 다시 확인해야 합니다.")
                 
             except Exception as e:
                 status.update(label="❌ 오류 발생", state="error", expanded=True)
