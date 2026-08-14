@@ -256,7 +256,7 @@ if menu == "공고 자동수집":
 
     if st.button("공고 수집", type="primary"):
         if manage_sheet_lock("check"):
-            st.warning("⏳ 현재 다른 팀원이 공고를 수집하고 있습니다. 서버 보호를 위해 잠시 후 새로고침(F5)을 눌러주세요!")
+            st.warning("⏳ 현재 다른 팀원이 공고 수집을 진행 중입니다. 서버 보호를 위해 잠시 후 새로고침(F5)을 눌러주세요!")
         else:
             if "빠른" in engine_choice: target_script = "main_pure.py"
             elif "정밀" in engine_choice: target_script = "main.py"
@@ -386,7 +386,7 @@ elif menu == "공고 통계 및 분석":
                 valid_specials = df['특이사항'].astype(str).str.strip()
                 special_df = df[~valid_specials.str.lower().isin(ignore_words)]
                 if not special_df.empty:
-                    specials_list = special_df['특이사항'].astype(str).str.replace('🔥', '').str.replace('🔴', '').str.replace('🔵', '').str.split(',')
+                    specials_list = df['특이사항'].astype(str).str.replace('🔥', '').str.replace('🔴', '').str.replace('🔵', '').str.split(',')
                     all_specials = [item.strip() for sublist in specials_list if isinstance(sublist, list) for item in sublist if item.strip() and item.strip().lower() not in ignore_words]
                     if all_specials: st.bar_chart(pd.Series(all_specials).value_counts().head(10))
         st.divider()
@@ -511,11 +511,11 @@ elif menu == "📝 게시판 / 메모장":
         st.write("아직 등록된 메모가 없습니다.")
 
 # ==========================================
-# 6. 🧪 스텔스 테스트 랩 (기업용 그리드 표 완전 파괴 추출판)
+# 6. 🧪 스텔스 테스트 랩 (TH 태그 원천 차단 무적 패치)
 # ==========================================
 elif menu == "🧪 스텔스 테스트 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
-    st.info("숨겨진 기업용 그리드 구조의 표를 완벽하게 파악하여 긁어옵니다.")
+    st.info("표의 제목(머리글)을 제외하고, 진짜 데이터가 담긴 셀(TD) 데이터만 정확하게 낚아챕니다.")
     
     test_url = st.text_input("타겟 URL (고정)", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
     
@@ -647,23 +647,24 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 else:
                     st.warning("⚠️ 지름길 버튼(+)과 메뉴를 모두 찾지 못했습니다.")
                 
-                # 🌟 추출 함수 완벽 진화: tbody 구애받지 않고, 열(td)이 많은 모든 표의 행(tr)을 뒤집니다!
+                # 🌟 추출 함수 완벽 진화: TH 태그(머리글)를 가진 줄은 데이터 수집에서 무조건 제외합니다!
                 def extract_table_data(d):
                     soup = BeautifulSoup(d.page_source, 'html.parser')
-                    # 특정 껍데기(tbody)에 구애받지 않고 화면 안의 모든 줄(tr)을 싹 다 가져옵니다.
                     rows = soup.find_all("tr")
                     valid_rows = []
                     
                     for r in rows:
-                        cells = r.find_all(['td', 'th'])
-                        # 사진을 보면 실제 데이터 표는 가로 칸(컬럼)이 10개가 넘어갑니다. (최소 6개 이상만 취급)
-                        if len(cells) >= 6:
+                        # 만약 이 줄(tr) 안에 제목을 뜻하는 <th> 태그가 포함되어 있다면 무조건 머리글(헤더)이므로 건너뜁니다!
+                        if r.find('th'):
+                            continue
+                            
+                        cells = r.find_all('td')
+                        if len(cells) >= 5: # 데이터 셀(td)이 5개 이상 있는 진짜 바디 줄만 취급
                             text = r.get_text(separator=' | ', strip=True)
-                            # 헤더(제목 줄), 검색 폼, 에러 메시지 텍스트는 걸러냅니다.
-                            if '결과상태' not in text and '구매운영단위' not in text and '조회된 데이터가 없습니다' not in text and '인증서' not in text:
-                                if len(text) > 15: # 너무 짧은 공백 줄도 버림
-                                    valid_rows.append(text)
-                                    
+                            ignore_words = ['인증서', '비밀번호', '조회된 데이터가 없습니다', '표시할 데이터가 없습니다', '구매운영단위', '결과상태', '공고일자']
+                            if not any(word in text for word in ignore_words) and len(text) > 15:
+                                valid_rows.append(text)
+                                
                     if len(valid_rows) > 0:
                         return [f"[{idx+1}] " + txt for idx, txt in enumerate(valid_rows[:15])]
                     return None
@@ -689,7 +690,7 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                             driver.switch_to.default_content()
                     
                     if res_list:
-                        break # 진짜 데이터가 수집되었으면 스피너 무시하고 즉각 탈출!
+                        break 
                         
                     if attempt == 7 and not search_clicked:
                         st.write("🔄 자동 조회가 지연되어 '검색' 버튼을 강제 클릭합니다...")
@@ -714,7 +715,7 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                                 driver.switch_to.default_content()
 
                 st.write("📸 2. 최종 렌더링된 화면 확보 중...")
-                st.image(driver.get_screenshot_as_png(), caption="2. 데이터 로딩이 완료된 화면 (스피너가 사라졌는지 확인하세요!)")
+                st.image(driver.get_screenshot_as_png(), caption="2. 데이터 로딩이 완료된 화면")
                 
                 status.update(label="✅ 침투 및 추출 완료!", state="complete", expanded=True)
                 
