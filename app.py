@@ -8,16 +8,15 @@ import plotly.express as px
 import time
 import re
 from datetime import datetime, timedelta, timezone
-from bs4 import BeautifulSoup
 
-# 한국 표준시(KST) 강제 설정
+# 🌟 한국 표준시(KST) 강제 설정
 KST = timezone(timedelta(hours=9))
 
 # 화면 기본 설정
 st.set_page_config(page_title="맞춤 공고 수집 대시보드", layout="wide")
 
 # ==========================================
-# 대시보드 보안 설정
+# 🔐 대시보드 보안 자물쇠 설정
 # ==========================================
 DASHBOARD_PASSWORD = "0804"  
 
@@ -28,6 +27,7 @@ def check_password():
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             st.title("🔒 대시보드 보안 접속")
+            st.info("이 대시보드는 우리 팀원만 접근할 수 있습니다.\n\n발급받은 비밀번호를 입력해 주세요.")
             pwd_input = st.text_input("🔑 비밀번호 입력", type="password")
             if st.button("🚀 접속하기", use_container_width=True, type="primary"):
                 if pwd_input == DASHBOARD_PASSWORD:
@@ -42,7 +42,7 @@ if not check_password():
     st.stop()
 
 # ==========================================
-# 구글 시트 락 시스템 및 통신
+# 🛑 영구 불멸의 '구글 시트' 자물쇠 시스템
 # ==========================================
 def manage_sheet_lock(action="check", engine_name=""):
     try:
@@ -73,7 +73,7 @@ def manage_sheet_lock(action="check", engine_name=""):
             )
         elif action == "unlock":
             ws.update(range_name="A1:B1", values=[["free", str(time.time())]])
-    except:
+    except Exception as e:
         return False
 
 @st.cache_data(ttl=60)
@@ -88,6 +88,9 @@ def get_recent_log():
     except:
         return "기록 없음", "-"
 
+# ==========================================
+# ⚡ 데이터 통신 및 상태 업데이트 함수
+# ==========================================
 if "GOOGLE_CREDENTIALS" in st.secrets:
     with open("google_key.json", "w", encoding="utf-8") as f:
         f.write(st.secrets["GOOGLE_CREDENTIALS"])
@@ -100,7 +103,7 @@ def get_google_sheet(sheet_name):
         worksheet = doc.worksheet(sheet_name)
         data = worksheet.get_all_records()
         return pd.DataFrame(data)
-    except:
+    except Exception as e:
         return pd.DataFrame()
 
 def update_notice_status(notice_keys_to_mark, status_value):
@@ -132,11 +135,12 @@ def update_notice_status(notice_keys_to_mark, status_value):
                 
         if cells_to_update: worksheet.update_cells(cells_to_update)
         return True
-    except:
+    except Exception as e:
+        st.error(f"🚨 알 수 없는 오류 발생: {e}")
         return False
 
 # ==========================================
-# 테이블 렌더링 헬퍼 함수
+# 🎨 테이블 렌더링 헬퍼 함수
 # ==========================================
 def render_notice_table(df, key_prefix):
     if df.empty:
@@ -149,9 +153,13 @@ def render_notice_table(df, key_prefix):
     
     def highlight_row(row):
         status = str(row.get('검토유무', '')).strip()
+        title_text = str(row.get('공고제목', ''))
+        special_text = str(row.get('특이사항', ''))
+        
         if status == '내업무아님': return ['background-color: #8c8c8c; color: #ffffff; text-decoration: line-through;'] * len(row)
         if status == '내업무맞음': return ['background-color: #cce5ff; color: #004080; font-weight: bold;'] * len(row)
         if status == '완료': return ['background-color: #f0f2f6; color: #a0aab2;'] * len(row)
+        if '안전점검' in title_text or '안전점검' in special_text: return ['background-color: #e6ffe6; color: #006600; font-weight: bold;'] * len(row)
         return [''] * len(row)
         
     styled_df = display_df.style.apply(highlight_row, axis=1)
@@ -167,43 +175,53 @@ def render_notice_table(df, key_prefix):
     
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        if st.button("🔵 업무 맞음", key=f"btn1_{key_prefix}", use_container_width=True) and selected_keys:
-            if update_notice_status(selected_keys, "내업무맞음"): get_google_sheet.clear(); st.rerun()
+        if st.button("🔵 우리의 업무 맞음 (파랑)", key=f"btn1_{key_prefix}", use_container_width=True):
+            if selected_keys:
+                if update_notice_status(selected_keys, "내업무맞음"): get_google_sheet.clear(); st.rerun()
     with c2:
-        if st.button("⚫ 업무 아님", key=f"btn2_{key_prefix}", use_container_width=True) and selected_keys:
-            if update_notice_status(selected_keys, "내업무아님"): get_google_sheet.clear(); st.rerun()
+        if st.button("⚫ 우리의 업무 아님 (진회색)", key=f"btn2_{key_prefix}", use_container_width=True):
+            if selected_keys:
+                if update_notice_status(selected_keys, "내업무아님"): get_google_sheet.clear(); st.rerun()
     with c3:
-        if st.button("✅ 검토 완료", key=f"btn3_{key_prefix}", use_container_width=True) and selected_keys:
-            if update_notice_status(selected_keys, "완료"): get_google_sheet.clear(); st.rerun()
+        if st.button("✅ 일반 검토 완료 (연회색)", key=f"btn3_{key_prefix}", use_container_width=True):
+            if selected_keys:
+                if update_notice_status(selected_keys, "완료"): get_google_sheet.clear(); st.rerun()
     with c4:
-        if st.button("🔄 초기화", key=f"btn4_{key_prefix}", use_container_width=True) and selected_keys:
-            if update_notice_status(selected_keys, "미검토"): get_google_sheet.clear(); st.rerun()
+        if selected_keys:
+            with st.popover("🔄 상태 초기화 (미검토)", use_container_width=True):
+                if st.button("네, 초기화 실행", key=f"reset_{key_prefix}", use_container_width=True):
+                    if update_notice_status(selected_keys, "미검토"): get_google_sheet.clear(); st.rerun()
 
 # ==========================================
 # 사이드바 메뉴 설정
 # ==========================================
 st.sidebar.title("📌 메뉴 선택")
-menu = st.sidebar.radio("이동할 메뉴를 선택하세요:", ["공고 자동수집", "공고 통계", "🎯 타겟 공고", "사이트 검토 필요", "📝 게시판", "🧪 스텔스 랩 (한수원)"])
+menu = st.sidebar.radio(
+    "이동할 메뉴를 선택하세요:",
+    ["공고 자동수집", "공고 통계 및 분석", "🎯 타겟 공고 (내 업무)", "사이트 검토 필요(오류/개편)", "📝 게시판 / 메모장", "🧪 스텔스 테스트 랩 (한수원)"]
+)
 st.sidebar.divider()
 
 # ==========================================
-# 1. 공고 자동수집 메뉴
+# 1. 공고 자동수집 메뉴 (생략)
 # ==========================================
 if menu == "공고 자동수집":
     st.title("🚀 공고 자동 수집 & 실시간 검색")
     df = get_google_sheet("notices")
     if not df.empty:
-        st.write(f"현재 총 {len(df)}개의 공고가 로드되었습니다. (UI 생략)")
+        st.write(f"현재 총 {len(df)}개의 공고가 로드되었습니다. (UI 생략, 기능 유지)")
 
 # ==========================================
-# 6. 스텔스 테스트 랩 (추출 로직 전면 개편)
+# 6. 🧪 스텔스 테스트 랩 (비주얼 좌표 스크래퍼 완결판)
 # ==========================================
-elif menu == "🧪 스텔스 랩 (한수원)":
+elif menu == "🧪 스텔스 테스트 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
-    test_url = st.text_input("타겟 URL", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
+    st.info("HTML 태그를 맹신하지 않고, 화면상의 X, Y 좌표를 통해 사람의 눈처럼 텍스트를 조합해냅니다.")
     
-    if st.button("🚀 침투 시작", type="primary"):
-        with st.status("진행 중...", expanded=True) as status:
+    test_url = st.text_input("타겟 URL (고정)", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
+    
+    if st.button("🚀 스텔스 침투 및 엑스레이 촬영 시작", type="primary"):
+        with st.status("서버에 스텔스 봇을 투입합니다...", expanded=True) as status:
             try:
                 from selenium import webdriver
                 from selenium.webdriver.chrome.service import Service
@@ -225,125 +243,169 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 
                 driver.execute_cdp_cmd('Network.setUserAgentOverride', {
                     "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
-                    "acceptLanguage": 'ko-KR,ko;q=0.9'
+                    "acceptLanguage": 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7'
                 })
                 
-                st.write("접속 및 대기 중...")
+                st.write("🔗 1. 사이트 접속 및 10초 대기 중...")
                 driver.get(test_url)
                 time.sleep(10) 
                 
-                st.write("팝업 제거 중...")
-                js_close = "document.querySelectorAll('a, button, span, img').forEach(el => { var t = (el.innerText||'').trim(); var a = (el.getAttribute('alt')||'').trim(); if(['닫기','하루동안 열지 않기','X','close'].includes(t) || ['닫기','close'].includes(a)) el.click(); });"
-                try: driver.execute_script(js_close); time.sleep(1)
+                st.write("🛡️ 2. 화면을 가리는 팝업 강제 철거 중...")
+                js_close_popup = """
+                var pop_btns = document.querySelectorAll('a, button, span, img');
+                for(var i=0; i<pop_btns.length; i++) {
+                    var txt = (pop_btns[i].innerText || '').trim();
+                    var alt = (pop_btns[i].getAttribute('alt') || '').trim();
+                    if(['닫기', '하루동안 열지 않기', 'X', 'close'].includes(txt) || ['닫기', 'close'].includes(alt)) {
+                        pop_btns[i].click();
+                    }
+                }
+                """
+                try: driver.execute_script(js_close_popup); time.sleep(1) 
                 except: pass
                 
-                st.write("메뉴 탐색 및 클릭 시도...")
-                js_click = """
-                var btns = document.querySelectorAll('a.plus, a.btn_more, a[title*="더보기"]');
-                for(var i=0; i<btns.length; i++) { try { btns[i].click(); return '더보기 클릭'; } catch(e){} }
+                st.write("🖱️ 3. 중앙 '더보기(+)' 또는 '입찰공고조회' 직접 타격 시도 중...")
+                js_ultimate_hack = """
+                var plusBtns = document.querySelectorAll('a.plus, a.btn_more, a[title*="더보기"]');
+                for(var i=0; i<plusBtns.length; i++) {
+                    try { plusBtns[i].click(); return 'SUCCESS: 더보기 클릭'; } catch(e){}
+                }
                 var els = document.querySelectorAll('a, span, li, button');
                 for(var i=0; i<els.length; i++) {
-                    if((els[i].innerText||'').replace(/\\s/g, '').indexOf('입찰공고조회') > -1) {
+                    if((els[i].innerText || '').replace(/\\s/g, '').indexOf('입찰공고조회') > -1) {
                         var href = els[i].getAttribute('href');
-                        if(href && href.indexOf('javascript:') > -1) { eval(href.replace('javascript:','')); return 'JS 실행'; }
-                        els[i].click(); return '직접 클릭';
+                        if(href && href.indexOf('javascript:') > -1) { eval(href.replace('javascript:', '')); return 'SUCCESS: JS 실행'; }
+                        els[i].click(); return 'SUCCESS: 직접 클릭';
                     }
-                } return '실패';
+                }
+                return 'NOT_FOUND';
                 """
                 
                 frames = [None] + driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
-                for f in frames:
+                for frame in frames:
                     try:
-                        if f: driver.switch_to.frame(f)
-                        res = driver.execute_script(js_click)
-                        if res != '실패':
+                        if frame: driver.switch_to.frame(frame)
+                        res = driver.execute_script(js_ultimate_hack)
+                        if 'SUCCESS' in res:
                             driver.switch_to.default_content()
                             break
                         driver.switch_to.default_content()
                     except: driver.switch_to.default_content()
                 
-                time.sleep(2)
-                driver.execute_script("window.dispatchEvent(new Event('resize'));")
+                # 🌟 비주얼 좌표 스크래퍼(Visual Scraper) 자바스크립트
+                # HTML 태그를 무시하고 렌더링된 요소의 X, Y 좌표를 통해 표를 직접 조립합니다.
+                js_visual_scraper = """
+                function getVisualGrid() {
+                    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+                    var node;
+                    var items = [];
+                    // 화면에 렌더링된 모든 글자와 픽셀 위치를 가져옵니다.
+                    while(node = walker.nextNode()) {
+                        var text = node.nodeValue.trim();
+                        if(text.length > 0) {
+                            var parent = node.parentElement;
+                            if(parent) {
+                                var rect = parent.getBoundingClientRect();
+                                if(rect.width > 0 && rect.height > 0) {
+                                    // Y좌표를 10픽셀 단위로 묶어 약간의 높이 차이 보정 (같은 가로줄 인식)
+                                    var y = Math.round(rect.top / 10) * 10;
+                                    items.push({text: text, y: y, x: Math.round(rect.left)});
+                                }
+                            }
+                        }
+                    }
+                    // Y좌표(세로 위치)가 동일한 요소들을 그룹화
+                    var rows = {};
+                    items.forEach(function(item) {
+                        if(!rows[item.y]) rows[item.y] = [];
+                        rows[item.y].push(item);
+                    });
+                    // X좌표(가로 위치) 순으로 정렬하여 | 기호로 결합
+                    var result = [];
+                    for(var y in rows) {
+                        rows[y].sort(function(a, b) { return a.x - b.x; });
+                        var rowText = rows[y].map(function(a) { return a.text; }).join(' | ');
+                        result.push(rowText);
+                    }
+                    return result;
+                }
+                return getVisualGrid();
+                """
+
+                st.write("⏳ 4. 시각적 데이터 렌더링 동적 대기 (최대 30초)...")
                 
-                # HTML 구조(태그) 의존성을 완전히 배제하고, 순차적인 텍스트 배열에서 윈도우 슬라이딩 방식으로 데이터 추출
-                def extract_data(d):
-                    soup = BeautifulSoup(d.page_source, 'html.parser')
-                    # 페이지 내의 모든 가시적 텍스트를 순서대로 리스트화
-                    strings = list(soup.stripped_strings)
-                    valid_rows = []
-                    
-                    for i, s in enumerate(strings):
-                        # 공고 데이터의 핵심 키워드를 트리거로 사용
-                        if s in ['입찰진행', '공고진행', '전자입찰', '현장입찰']:
-                            # 해당 키워드 주변의 텍스트 조각들을 묶어 하나의 행(Row)으로 간주
-                            start_idx = max(0, i - 3)
-                            end_idx = min(len(strings), i + 15)
-                            chunk = strings[start_idx:end_idx]
-                            
-                            # 공고번호 정규식 패턴 확인 (예: U26S156000)
-                            has_notice_num = any(re.match(r'^[A-Z][0-9A-Z]{8,11}$', x) for x in chunk)
-                            
-                            if has_notice_num:
-                                row_str = " | ".join(chunk)
-                                # 중복 수집 방지 (앞 5개 요소가 동일하면 같은 행으로 취급)
-                                prefix = " | ".join(chunk[:5])
-                                if not any(v.startswith(prefix) for v in valid_rows):
-                                    valid_rows.append(row_str)
-
-                    if valid_rows:
-                        return [f"[{idx+1}] {text}" for idx, text in enumerate(valid_rows[:20])]
-                    return None
-
-                st.write("데이터 렌더링 동적 대기 (최대 30초)...")
                 res_list = None
                 search_clicked = False
                 
+                # 최대 15번 (약 30초) 반복하며 시각적 데이터를 감시
                 for attempt in range(15):
                     time.sleep(2)
-                    driver.execute_script("window.dispatchEvent(new Event('resize'));")
+                    driver.execute_script("window.dispatchEvent(new Event('resize'));") # 찌그러짐 방지
                     
                     frames = [None] + driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
-                    for f in frames:
+                    
+                    for frame in frames:
                         try:
-                            if f: driver.switch_to.frame(f)
-                            res_list = extract_data(driver)
+                            if frame: driver.switch_to.frame(frame)
+                            # 파이썬 BeautifulSoup 대신, 자바스크립트로 브라우저 안에서 시각적으로 조립된 결과물을 받아옴
+                            visual_rows = driver.execute_script(js_visual_scraper)
+                            
+                            valid_rows = []
+                            ignore_words = ['인증서', '비밀번호', '조회된 데이터', '표시할 데이터', '구매운영단위', '결과상태', '입찰방식', '공고일자', 'PC 요구사항', 'Microsoft']
+                            
+                            if visual_rows:
+                                for row in visual_rows:
+                                    # 파이프(|)가 4개 이상 연결되어 있고 30자가 넘는 줄만 '실제 데이터 행'으로 인정
+                                    if len(row) > 30 and row.count('|') >= 4 and not any(w in row for w in ignore_words):
+                                        valid_rows.append(row)
+                                        
+                            if valid_rows:
+                                # 중복 제거 로직
+                                unique_rows = list(dict.fromkeys(valid_rows))
+                                res_list = [f"[{i+1}] {txt}" for i, txt in enumerate(unique_rows[:15])]
+                                
                             driver.switch_to.default_content()
                             if res_list: break
-                        except: driver.switch_to.default_content()
-                        
+                        except:
+                            driver.switch_to.default_content()
+                    
                     if res_list:
-                        break
+                        break 
                         
+                    # 4번 돌았는데(약 8초 경과) 데이터가 안 나오면 '검색' 강제 클릭
                     if attempt == 4 and not search_clicked:
-                        st.write("자동 조회 지연 감지. '검색' 버튼 강제 클릭...")
-                        js_search = """
+                        st.write("🔄 5. 자동 조회가 지연되어 '검색' 버튼을 강제 클릭합니다...")
+                        js_search_click = """
                         var btns = document.querySelectorAll('a, button, span');
                         for(var i=0; i<btns.length; i++){
                             var txt = (btns[i].innerText || btns[i].textContent || '').trim();
                             if(txt === '검색') { btns[i].click(); return true; }
                         } return false;
                         """
-                        for f in frames:
+                        for frame in frames:
                             try:
-                                if f: driver.switch_to.frame(f)
-                                if driver.execute_script(js_search):
+                                if frame: driver.switch_to.frame(frame)
+                                if driver.execute_script(js_search_click):
                                     search_clicked = True
                                     driver.switch_to.default_content()
                                     break
                                 driver.switch_to.default_content()
-                            except: driver.switch_to.default_content()
+                            except: pass
 
-                st.image(driver.get_screenshot_as_png(), caption="추출 완료 시점 렌더링 화면")
-                status.update(label="처리 완료", state="complete", expanded=True)
+                st.write("📸 6. 최종 렌더링 및 추출 시점 화면 확보 중...")
+                st.image(driver.get_screenshot_as_png(), caption="데이터 로딩 완료 화면 (스피너가 사라졌는지 확인)")
+                
+                status.update(label="✅ 침투 및 추출 완료!", state="complete", expanded=True)
                 
                 if res_list:
-                    st.success(f"데이터 추출 성공 ({len(res_list)}건)")
+                    st.success(f"✅ 축하합니다! 비주얼 스크래핑으로 총 {len(res_list)}개의 공고 데이터를 끄집어냈습니다.")
                     st.code("\n".join(res_list))
                 else:
-                    st.error("데이터 추출 실패 (시간 초과 또는 조건에 맞는 공고 없음)")
-                    
+                    st.error("❌ 데이터를 찾을 수 없습니다. (검색 조건에 맞는 공고가 실제로 없거나 로딩이 너무 오래 걸립니다.)")
+                
             except Exception as e:
-                status.update(label="오류", state="error", expanded=True)
-                st.error(f"상세 에러: {e}")
+                status.update(label="❌ 오류 발생", state="error", expanded=True)
+                st.error(f"오류 상세 내용: {e}")
             finally:
-                if 'driver' in locals() and driver is not None: driver.quit()
+                if 'driver' in locals() and driver is not None:
+                    driver.quit()
