@@ -193,7 +193,7 @@ if menu == "공고 자동수집":
         st.write(f"현재 총 {len(df)}개의 공고가 로드되었습니다. (UI 생략)")
 
 # ==========================================
-# 6. 스텔스 테스트 랩 (None Load Strategy 적용)
+# 6. 스텔스 테스트 랩 (비동기 Hit & Run 무적 패치 적용)
 # ==========================================
 elif menu == "🧪 스텔스 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
@@ -217,9 +217,8 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 chrome_options.add_argument("--window-size=1920,1080")
                 chrome_options.add_argument("--lang=ko-KR")
                 
-                # 🛑 핵심 무적 패치: 무한 로딩 원천 차단 (페이지가 다 안 불려와도 강제 진행)
+                # 무한 로딩 원천 차단
                 chrome_options.page_load_strategy = 'none' 
-                
                 chrome_options.add_argument("--disable-blink-features=AutomationControlled")
                 chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
                 chrome_options.add_experimental_option('useAutomationExtension', False)
@@ -228,48 +227,57 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 except: service = Service(ChromeDriverManager().install())
                 driver = webdriver.Chrome(service=service, options=chrome_options)
                 
+                # 🛑 무적 패치 1: 15초 넘으면 무조건 로딩 끊어버림
+                driver.set_page_load_timeout(15)
+                
                 driver.execute_cdp_cmd('Network.setUserAgentOverride', {
                     "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36',
                     "acceptLanguage": 'ko-KR,ko;q=0.9'
                 })
                 
-                st.write("접속 시작 (무한 로딩 무시 적용)...")
-                
-                # 네트워크 접속만 성공하면 바로 다음 코드로 넘어가도록 10초 제한
-                driver.set_page_load_timeout(10)
+                st.write("접속 시작 (무한 로딩 15초 제한 컷)...")
                 try:
                     driver.get(test_url)
                 except:
-                    pass # 타임아웃 예외가 발생하든 말든 백그라운드 렌더링을 믿고 무시
+                    pass # 15초 지나서 타임아웃 나도 당황하지 않고 다음 코드로 넘어감!
                 
-                st.write("백그라운드 렌더링 대기 중 (15초)...")
-                time.sleep(15) 
+                st.write("백그라운드 렌더링 대기 중 (10초)...")
+                time.sleep(10) 
                 
-                st.write("팝업 제거 시도...")
+                st.write("팝업 제거 시도 (비동기)...")
+                # 🛑 무적 패치 2: 팝업 닫기도 setTimeout으로 쏘고 도망감
                 js_close_popup = """
                 document.querySelectorAll('a, button, span, img').forEach(el => {
                     var t = (el.innerText || '').trim();
                     var a = (el.getAttribute('alt') || '').trim();
                     if(['닫기', '하루동안 열지 않기', 'X', 'close'].includes(t) || ['닫기', 'close'].includes(a)) {
-                        el.click();
+                        setTimeout(function(){ el.click(); }, 10);
                     }
                 });
                 """
                 try: driver.execute_script(js_close_popup); time.sleep(2) 
                 except: pass
                 
-                st.write("입찰공고조회 메뉴 직접 타격...")
+                st.write("입찰공고조회 메뉴 직접 타격 (비동기 Hit & Run)...")
+                # 🛑 무적 패치 3: 메뉴 클릭 후 페이지 이동 대기 없이 바로 파이썬으로 복귀!
                 js_ultimate_hack = """
                 var plusBtns = document.querySelectorAll('a.plus, a.btn_more, a[title*="더보기"]');
-                for(var i=0; i<plusBtns.length; i++) {
-                    try { plusBtns[i].click(); return 'SUCCESS: 더보기 클릭'; } catch(e){}
+                if(plusBtns.length > 0) {
+                    setTimeout(function() { plusBtns[0].click(); }, 10);
+                    return 'SUCCESS: 더보기 클릭(비동기)';
                 }
                 var els = document.querySelectorAll('a, span, li, button');
                 for(var i=0; i<els.length; i++) {
-                    if((els[i].innerText || '').replace(/\\s/g, '').indexOf('입찰공고조회') > -1) {
-                        var href = els[i].getAttribute('href');
-                        if(href && href.indexOf('javascript:') > -1) { eval(href.replace('javascript:', '')); return 'SUCCESS: JS 실행'; }
-                        els[i].click(); return 'SUCCESS: 직접 클릭';
+                    var el = els[i];
+                    if((el.innerText || '').replace(/\\s/g, '').indexOf('입찰공고조회') > -1) {
+                        var href = el.getAttribute('href');
+                        if(href && href.indexOf('javascript:') > -1) { 
+                            var jsCode = href.replace('javascript:', '');
+                            setTimeout(function() { eval(jsCode); }, 10);
+                            return 'SUCCESS: JS 실행(비동기)'; 
+                        }
+                        setTimeout(function() { el.click(); }, 10);
+                        return 'SUCCESS: 직접 클릭(비동기)';
                     }
                 }
                 return 'NOT_FOUND';
@@ -288,7 +296,7 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 
                 st.write("데이터 렌더링 동적 대기 (최대 30초)...")
                 
-                # 비주얼 스크래퍼 (최말단 텍스트 노드 추출)
+                # 비주얼 스크래퍼 (이건 화면만 읽어오는 거라 에러 안남)
                 js_visual_scraper = """
                 var els = document.querySelectorAll('td, span, div, a');
                 var items = [];
@@ -358,10 +366,13 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                         break 
                         
                     if attempt == 4 and not search_clicked:
-                        st.write("조회 지연 감지. '검색' 버튼 강제 클릭...")
+                        st.write("조회 지연 감지. '검색' 버튼 강제 클릭 (비동기)...")
+                        # 🛑 무적 패치 4: 검색 버튼도 누르고 도망가기
                         js_search_click = """
                         document.querySelectorAll('a, button, span').forEach(el => {
-                            if((el.innerText || '').trim() === '검색') el.click();
+                            if((el.innerText || '').trim() === '검색') {
+                                setTimeout(function(){ el.click(); }, 10);
+                            }
                         });
                         """
                         for f in frames:
