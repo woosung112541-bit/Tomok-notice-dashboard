@@ -511,11 +511,11 @@ elif menu == "📝 게시판 / 메모장":
         st.write("아직 등록된 메모가 없습니다.")
 
 # ==========================================
-# 6. 🧪 스텔스 테스트 랩 (마우스 Hover 액션 및 3단 콤보 탑재판)
+# 6. 🧪 스텔스 테스트 랩 (엔지니어 직관 100% 무적 패치)
 # ==========================================
 elif menu == "🧪 스텔스 테스트 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
-    st.info("대표님이 제보해주신 정석 루트에 따라 로봇이 사람처럼 마우스를 '올려두고 유지하며(Hover)' 3단 콤보를 밟아 들어갑니다.")
+    st.info("어려운 3단 메뉴를 과감히 버리고, 중앙에 있는 더보기(+) 버튼을 스나이핑하여 바로 뚫어냅니다.")
     
     test_url = st.text_input("타겟 URL (고정)", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
     
@@ -527,7 +527,6 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 from selenium.webdriver.chrome.service import Service
                 from selenium.webdriver.chrome.options import Options
                 from selenium.webdriver.common.by import By
-                from selenium.webdriver.common.action_chains import ActionChains
                 from webdriver_manager.chrome import ChromeDriverManager
                 from bs4 import BeautifulSoup
                 import time
@@ -566,90 +565,96 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 var pop_btns = document.querySelectorAll('a, button, span, div, img');
                 var closed = false;
                 for(var i=0; i<pop_btns.length; i++) {
-                    var txt = pop_btns[i].textContent || pop_btns[i].innerText;
-                    var alt = pop_btns[i].getAttribute('alt');
-                    if(txt) {
-                        txt = txt.trim();
-                        if(txt === '닫기' || txt === '하루동안 열지 않기' || txt === '오늘 하루 이 창을 열지 않음' || txt === 'X') {
-                            pop_btns[i].click();
-                            closed = true;
-                        }
-                    }
-                    if(alt && (alt === '닫기' || alt === 'close')) {
-                        pop_btns[i].click();
-                        closed = true;
+                    var txt = (pop_btns[i].textContent || pop_btns[i].innerText || '').trim();
+                    var alt = (pop_btns[i].getAttribute('alt') || '').trim();
+                    if(['닫기', '하루동안 열지 않기', '오늘 하루 이 창을 열지 않음', 'X', 'close'].includes(txt) || ['닫기', 'close'].includes(alt)) {
+                        pop_btns[i].click(); closed = true;
                     }
                 }
                 var close_icons = document.querySelectorAll('.close, .btn_close');
-                for(var j=0; j<close_icons.length; j++) {
-                    close_icons[j].click();
-                    closed = true;
-                }
+                for(var j=0; j<close_icons.length; j++) { close_icons[j].click(); closed = true; }
                 return closed;
                 """
                 try:
                     driver.execute_script(js_close_popup)
                     time.sleep(2) 
-                except:
-                    pass
+                except: pass
                 
                 st.write("📸 1. 팝업 제거 후 메인 화면 확보 중...")
-                st.image(driver.get_screenshot_as_png(), caption="1. 팝업창이 성공적으로 파괴된 메인 화면입니다.")
+                st.image(driver.get_screenshot_as_png(), caption="1. 팝업창이 닫힌 메인 화면")
                 
-                # 🌟 핵심 무적 패치: 'ActionChains'를 이용한 사람과 완벽하게 똑같은 Hover 조작
-                st.write("🖱️ 대표님의 제보를 바탕으로, 마우스를 올리고 기다리는(Hover) 3단 콤보를 시도합니다...")
+                st.write("🖱️ 3단 메뉴를 버리고, 메인 위젯의 '더보기(+)' 버튼 직통 스나이핑 시도 중...")
+                
+                # 🌟 무적 패치: Hover 없이 지름길(+) 버튼 또는 강제 렌더링 후 클릭!
+                js_ultimate_hack = """
+                function ultimateHack() {
+                    // 전략 1: 메인 화면의 [+] 또는 [더보기] 아이콘 스나이핑
+                    var plusBtns = document.querySelectorAll('a.plus, a.btn_more, a.more, a[title*="더보기"], img[alt*="더보기"]');
+                    for(var i=0; i<plusBtns.length; i++) {
+                        var el = plusBtns[i];
+                        if(el.tagName !== 'A' && el.closest('a')) el = el.closest('a');
+                        
+                        var href = el.getAttribute('href');
+                        var onclick = el.getAttribute('onclick');
+                        
+                        try {
+                            if(onclick) { eval(onclick); return 'SUCCESS: 더보기(+) 스크립트 실행'; }
+                            if(href && href.indexOf('javascript:') > -1) { eval(href.replace('javascript:', '')); return 'SUCCESS: 더보기(+) JS 링크 실행'; }
+                            if(href && href !== '#' && href !== '') { window.location.href = href; return 'SUCCESS: 더보기(+) 페이지 직행'; }
+                            el.click(); return 'SUCCESS: 더보기(+) 단순 클릭';
+                        } catch(e) { el.click(); return 'SUCCESS: 더보기(+) 단순 클릭(예외)'; }
+                    }
+
+                    // 전략 2: Plan B. 3단 메뉴 강제 펼침 후 '입찰공고조회' 찌르기
+                    var hiddenElems = document.querySelectorAll('*');
+                    for(var i=0; i<hiddenElems.length; i++) {
+                        var style = window.getComputedStyle(hiddenElems[i]);
+                        if(style.display === 'none') hiddenElems[i].style.display = 'block';
+                    }
+
+                    var els = document.querySelectorAll('a, span, li, button');
+                    for(var i=0; i<els.length; i++) {
+                        var txt = (els[i].textContent || els[i].innerText || '').replace(/\\s/g, '');
+                        if(txt.indexOf('입찰공고조회') > -1) {
+                            var el = els[i];
+                            if(el.tagName !== 'A' && el.closest('a')) el = el.closest('a');
+                            
+                            var href = el.getAttribute('href');
+                            var onclick = el.getAttribute('onclick');
+                            
+                            try {
+                                if(onclick) { eval(onclick); return 'SUCCESS: 입찰공고조회 스크립트 실행'; }
+                                if(href && href.indexOf('javascript:') > -1) { eval(href.replace('javascript:', '')); return 'SUCCESS: 입찰공고조회 JS 링크 실행'; }
+                                if(href && href !== '#' && href !== '') { window.location.href = href; return 'SUCCESS: 입찰공고조회 URL 이동'; }
+                                el.click(); return 'SUCCESS: 입찰공고조회 강제 클릭';
+                            } catch(e) { el.click(); return 'SUCCESS: 입찰공고조회 강제 클릭(예외)'; }
+                        }
+                    }
+                    return 'NOT_FOUND';
+                }
+                return ultimateHack();
+                """
                 
                 combo_msg = "실패"
-                driver.switch_to.default_content() # 메뉴바는 최상단 프레임에 있으므로 기본 프레임 유지
+                frames = [None] + driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
                 
-                try:
-                    # 1단계: '입찰공고' (메인 탭) 찾아서 마우스 올리기
-                    top_menus = driver.find_elements(By.XPATH, "//a[contains(text(), '입찰공고')] | //span[contains(text(), '입찰공고')]")
-                    top_menu = None
-                    for tm in top_menus:
-                        if tm.is_displayed() and tm.size['height'] > 0:
-                            top_menu = tm
+                for idx, frame in enumerate(frames):
+                    try:
+                        if frame: driver.switch_to.frame(frame)
+                        res = driver.execute_script(js_ultimate_hack)
+                        if 'SUCCESS' in res:
+                            combo_msg = res
+                            driver.switch_to.default_content()
                             break
-                            
-                    if top_menu:
-                        st.write("➡️ 1단계: 최상단 '입찰공고'에 마우스 올리고 대기 중...")
-                        ActionChains(driver).move_to_element(top_menu).perform()
-                        time.sleep(2) # 하위 메뉴가 스르륵 내려올 때까지 기다림
-                        
-                        # 2단계: 드롭다운 안의 '입찰공고' 찾아서 마우스 옮기기
-                        mid_menus = driver.find_elements(By.XPATH, "//a[contains(text(), '입찰공고')] | //span[contains(text(), '입찰공고')]")
-                        mid_menu = None
-                        for mm in mid_menus:
-                            if mm.id != top_menu.id and mm.is_displayed():
-                                mid_menu = mm
-                                break
-                                
-                        if mid_menu:
-                            st.write("➡️ 2단계: 하위 메뉴 '입찰공고'로 마우스 이동 후 유지...")
-                            ActionChains(driver).move_to_element(mid_menu).perform()
-                            time.sleep(2) # 3단계 메뉴가 우측으로 펼쳐질 때까지 기다림
-                            
-                            # 3단계: 드디어 나타난 '입찰공고조회' 클릭
-                            final_menus = driver.find_elements(By.XPATH, "//*[contains(text(), '입찰공고조회')]")
-                            for fm in final_menus:
-                                if fm.is_displayed():
-                                    st.write("➡️ 3단계: 드디어 나타난 '입찰공고조회' 최종 타격!")
-                                    # 혹시 모를 빗나감 방지를 위해 자바스크립트로 강제 클릭을 병행
-                                    href = fm.get_attribute('href')
-                                    if href and 'javascript:' in href:
-                                        driver.execute_script(href.replace('javascript:', ''))
-                                    else:
-                                        driver.execute_script("arguments[0].click();", fm)
-                                    combo_msg = "성공"
-                                    break
-                except Exception as e:
-                    st.write(f"⚠️ 마우스 조작 중 오류 발생: {e}")
+                        driver.switch_to.default_content()
+                    except:
+                        driver.switch_to.default_content()
                 
                 if combo_msg != "실패":
-                    st.success("🎯 3단 콤보 Hover 타격 적중! 표가 렌더링될 때까지 기다립니다...")
-                    time.sleep(5)
+                    st.success(f"🎯 지름길 타격 적중! ({combo_msg}) 넉넉히 7초 대기합니다...")
+                    time.sleep(7) # 넉넉하게 대기
                 else:
-                    st.warning("⚠️ 3단 콤보 타격에 실패했습니다. 팝업이 덜 닫혔거나 화면 밖으로 벗어났을 수 있습니다.")
+                    st.warning("⚠️ 지름길 버튼(+)과 메뉴를 모두 찾지 못했습니다.")
                 
                 st.write("📸 2. 타격 성공(또는 대기) 후 진입한 화면 확보 중...")
                 st.image(driver.get_screenshot_as_png(), caption="2. 메뉴 클릭 후 진입한 화면 (진짜 입찰공고 표가 보이는지 확인하세요!)")
@@ -660,7 +665,6 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                     soup = BeautifulSoup(d.page_source, 'html.parser')
                     rows = soup.select("table tbody tr")
                     if len(rows) > 0:
-                        # 로그인 폼 테이블(인증서 등)을 걸러내고 진짜 입찰 표만 추출
                         valid_rows = []
                         for r in rows:
                             text = r.get_text(separator=' | ', strip=True)
@@ -668,12 +672,11 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                                 valid_rows.append(text)
                         
                         if valid_rows:
-                            return [f"[{idx+1}] " + txt for idx, txt in enumerate(valid_rows[:10])]
+                            return [f"[{idx+1}] " + txt for idx, txt in enumerate(valid_rows[:15])]
                     return None
                 
                 res_list = extract_table_data(driver)
                 
-                # 메인에 없으면 iframe 싹쓸이
                 if not res_list:
                     frames = driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
                     for i in range(len(frames)):
