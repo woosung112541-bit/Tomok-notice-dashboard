@@ -8,6 +8,7 @@ import plotly.express as px
 import time
 import re
 from datetime import datetime, timedelta, timezone
+from bs4 import BeautifulSoup
 
 # 한국 표준시(KST) 강제 설정
 KST = timezone(timedelta(hours=9))
@@ -195,7 +196,7 @@ if menu == "공고 자동수집":
         st.write(f"현재 총 {len(df)}개의 공고가 로드되었습니다. (UI 생략)")
 
 # ==========================================
-# 6. 🧪 스텔스 테스트 랩 (Eager Loading & 타임아웃 예외처리 적용)
+# 6. 스텔스 테스트 랩 (Eager 스킵 제거, 정상 대기 및 봇 우회)
 # ==========================================
 elif menu == "🧪 스텔스 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
@@ -219,8 +220,10 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 chrome_options.add_argument("--window-size=1920,1080")
                 chrome_options.add_argument("--lang=ko-KR")
                 
-                # 🛑 핵심 수정 1: 무한 로딩 방지를 위한 Eager 전략 (DOM만 로드되면 바로 진행)
-                chrome_options.page_load_strategy = 'eager'
+                # 강력한 봇 우회(Stealth) 적용
+                chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+                chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+                chrome_options.add_experimental_option('useAutomationExtension', False)
                 
                 try: service = Service('/usr/bin/chromedriver')
                 except: service = Service(ChromeDriverManager().install())
@@ -231,18 +234,14 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                     "acceptLanguage": 'ko-KR,ko;q=0.9'
                 })
                 
-                st.write("접속 및 대기 중...")
+                driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
                 
-                # 🛑 핵심 수정 2: 강제 타임아웃 설정 (최대 30초) 및 예외 무시
-                driver.set_page_load_timeout(30)
-                try:
-                    driver.get(test_url)
-                except Exception as e:
-                    st.write(f"(알림) 페이지 로딩 타임아웃 발생, 강제 스킵 진행...")
+                st.write("접속 및 렌더링 대기 중 (최대 15초)...")
+                # 타임아웃 강제 예외처리를 제거하고, 사이트가 자연스럽게 로딩되도록 대기
+                driver.get(test_url)
+                time.sleep(15) 
                 
-                time.sleep(5) 
-                
-                st.write("팝업 제거 중...")
+                st.write("팝업 제거 시도...")
                 js_close_popup = """
                 document.querySelectorAll('a, button, span, img').forEach(el => {
                     var t = (el.innerText || '').trim();
@@ -252,10 +251,10 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                     }
                 });
                 """
-                try: driver.execute_script(js_close_popup); time.sleep(1) 
+                try: driver.execute_script(js_close_popup); time.sleep(2) 
                 except: pass
                 
-                st.write("메뉴 탐색 및 클릭 시도 중...")
+                st.write("입찰공고조회 메뉴 탐색 및 클릭...")
                 js_ultimate_hack = """
                 var plusBtns = document.querySelectorAll('a.plus, a.btn_more, a[title*="더보기"]');
                 for(var i=0; i<plusBtns.length; i++) {
@@ -283,7 +282,9 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                         driver.switch_to.default_content()
                     except: driver.switch_to.default_content()
                 
-                # 🛑 핵심 수정 3: 스크래퍼 경량화 (TreeWalker 제거, 말단 노드만 검색)
+                st.write("데이터 렌더링 동적 대기 (최대 30초)...")
+                
+                # 경량화된 비주얼 스크래퍼 (최말단 텍스트 노드 추출)
                 js_visual_scraper = """
                 var els = document.querySelectorAll('td, span, div, a');
                 var items = [];
@@ -294,7 +295,6 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                         if(txt.length > 0) {
                             var rect = el.getBoundingClientRect();
                             if(rect.width > 0 && rect.height > 0) {
-                                // Y좌표를 10px 단위로 버림하여 동일 라인 그룹화
                                 items.push({text: txt, y: Math.round(rect.top / 10) * 10, x: Math.round(rect.left)});
                             }
                         }
@@ -309,15 +309,12 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 for(var y in rows) {
                     rows[y].sort(function(a, b) { return a.x - b.x; });
                     var rowTexts = rows[y].map(function(a) { return a.text; });
-                    // 중복 텍스트 제거
                     var uniqueTexts = [...new Set(rowTexts)];
                     result.push(uniqueTexts.join(' | '));
                 }
                 return result;
                 """
 
-                st.write("데이터 렌더링 동적 대기 (최대 30초)...")
-                
                 res_list = None
                 search_clicked = False
                 
@@ -372,7 +369,12 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                         search_clicked = True
 
                 st.write("최종 렌더링 화면 캡처 중...")
-                st.image(driver.get_screenshot_as_png())
+                # 예외 없이 항상 스크린샷을 찍도록 보장
+                try:
+                    screenshot = driver.get_screenshot_as_png()
+                    st.image(screenshot, caption="최종 확보된 브라우저 화면")
+                except Exception as img_e:
+                    st.warning(f"스크린샷 캡처 실패: {img_e}")
                 
                 status.update(label="처리 완료", state="complete", expanded=True)
                 
