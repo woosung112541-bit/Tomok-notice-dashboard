@@ -511,15 +511,15 @@ elif menu == "📝 게시판 / 메모장":
         st.write("아직 등록된 메모가 없습니다.")
 
 # ==========================================
-# 6. 🧪 스텔스 테스트 랩 (한수원 우회 강제 클릭 패치)
+# 6. 🧪 스텔스 테스트 랩 (한수원 엑스레이 및 딥다이브 패치)
 # ==========================================
 elif menu == "🧪 스텔스 테스트 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
-    st.info("단일 페이지(SPA) 구조로 된 한수원(KHNP) 사이트에 접속 후, 3단계 드롭다운 메뉴를 자바스크립트로 강제 격파합니다.")
+    st.info("로봇이 직접 찍은 스크린샷(엑스레이)을 통해 사이트의 숨겨진 구조와 차단 원인을 시각적으로 분석합니다.")
     
     test_url = st.text_input("타겟 URL (고정)", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
     
-    if st.button("🚀 스텔스 침투 및 강제 클릭 시작", type="primary"):
+    if st.button("🚀 스텔스 침투 및 엑스레이 촬영 시작", type="primary"):
         with st.status("서버에 스텔스 봇을 투입합니다...", expanded=True) as status:
             st.write("🕵️ 브라우저 지문 위장 중...")
             try:
@@ -554,44 +554,98 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 
                 st.write(f"🔗 {test_url} 접속 중...")
                 driver.get(test_url)
+                time.sleep(4) 
                 
-                st.write("🖱️ 최종 목적지 '입찰공고조회' 뼈때리기(JS Click) 시도 중...")
-                # 🌟 핵심 패치: 메뉴가 숨겨져 있어도 DOM에 존재하면 강제로 클릭하는 스크립트
-                target_btn = WebDriverWait(driver, 15).until(
-                    EC.presence_of_element_located((By.XPATH, "//*[contains(text(), '입찰공고조회')]"))
-                )
-                driver.execute_script("arguments[0].click();", target_btn)
-                time.sleep(4) # 클릭 후 화면 전환(애니메이션) 대기
+                # 📸 엑스레이 1: 진입 직후 화면
+                st.write("📸 로봇의 시야(엑스레이) 확보 중...")
+                st.image(driver.get_screenshot_as_png(), caption="1. 로봇 진입 직후 화면 (어떤 팝업이나 화면이 떴는지 확인하세요!)")
                 
-                st.write("⏳ 클릭 후 내부 컴포넌트(데이터) 렌더링 대기 중...")
+                st.write("🔎 뼈때리기(JS Click): 전체 프레임 관통 및 메뉴 강제 클릭 시도 중...")
                 
-                # 내부 화면이 iframe으로 뜰 수 있으므로 프레임 검사
-                iframes = driver.find_elements(By.TAG_NAME, "iframe")
-                if len(iframes) > 0:
-                    st.write("🪟 내부 iframe 프레임으로 진입합니다.")
-                    driver.switch_to.frame(iframes[0])
-                    time.sleep(2)
-
+                # 🌟 JS 뼈때리기 코드: 공백 무시하고 입찰공고조회 또는 입찰공고 타격
+                js_click_code = """
+                var clicked = false;
+                var els = document.querySelectorAll('a, span, div, li, button');
+                for(var i=0; i<els.length; i++) {
+                    var txt = els[i].textContent || els[i].innerText;
+                    if(txt && txt.replace(/\s/g, '').indexOf('입찰공고조회') > -1) {
+                        els[i].click();
+                        return true;
+                    }
+                }
+                for(var i=0; i<els.length; i++) {
+                    var txt = els[i].textContent || els[i].innerText;
+                    if(txt && txt.trim() === '입찰공고') {
+                        els[i].click();
+                        return true;
+                    }
+                }
+                return false;
+                """
+                
+                clicked = False
+                # 1. 메인 프레임 뼈때리기
                 try:
-                    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr")))
-                except:
-                    pass # 테이블을 못 찾더라도 일단 아래 파싱 단계로 넘어가서 원인을 확인합니다.
+                    if driver.execute_script(js_click_code): clicked = True
+                except: pass
                 
-                soup = BeautifulSoup(driver.page_source, 'html.parser')
-                rows = soup.select("table tbody tr")
+                # 2. 서브 프레임들(이중창) 뼈때리기
+                if not clicked:
+                    frames = driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
+                    for i in range(len(frames)):
+                        try:
+                            driver.switch_to.frame(i)
+                            if driver.execute_script(js_click_code):
+                                clicked = True
+                                driver.switch_to.default_content()
+                                break
+                            driver.switch_to.default_content()
+                        except:
+                            driver.switch_to.default_content()
                 
-                st.write(f"✅ 성공! 클릭하여 총 {len(rows)}개의 공고 데이터를 끄집어냈습니다.")
+                if clicked:
+                    st.success("🎯 메뉴 요소 강제 타격 성공! 화면 전환을 기다립니다...")
+                else:
+                    st.warning("⚠️ 지정된 텍스트를 찾지 못했습니다. 화면에 다른 팝업이 있는지 위의 스크린샷을 확인하세요.")
                 
-                res_list = []
-                for idx, row in enumerate(rows[:10]):
-                    res_list.append(f"[{idx+1}] " + row.get_text(separator=' | ', strip=True))
-                    
+                time.sleep(5)
+                
+                # 📸 엑스레이 2: 클릭 후 화면
+                st.image(driver.get_screenshot_as_png(), caption="2. 메뉴 클릭(또는 대기) 후 화면")
+                
+                st.write("⏳ 내부 표(Table) 데이터 렌더링 검사 중...")
+                
+                # 🌟 표 추출 함수
+                def extract_table_data(d):
+                    soup = BeautifulSoup(d.page_source, 'html.parser')
+                    rows = soup.select("table tbody tr")
+                    if len(rows) > 0:
+                        return [f"[{idx+1}] " + r.get_text(separator=' | ', strip=True) for idx, r in enumerate(rows[:10])]
+                    return None
+                
+                res_list = extract_table_data(driver)
+                
+                # 메인 화면에 없으면 프레임 내부까지 다시 싹 다 뒤지기
+                if not res_list:
+                    frames = driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
+                    for i in range(len(frames)):
+                        try:
+                            driver.switch_to.frame(i)
+                            res_list = extract_table_data(driver)
+                            if res_list:
+                                driver.switch_to.default_content()
+                                break
+                            driver.switch_to.default_content()
+                        except:
+                            driver.switch_to.default_content()
+                
                 status.update(label="✅ 침투 및 추출 완료!", state="complete", expanded=True)
                 
                 if res_list:
+                    st.success(f"✅ 성공! 총 {len(res_list)}개의 공고 데이터를 끄집어냈습니다.")
                     st.code("\n".join(res_list))
                 else:
-                    st.warning("데이터가 발견되지 않았습니다. DOM 구조를 다시 확인해야 합니다.")
+                    st.error("데이터를 찾을 수 없습니다. 두 번째 스크린샷을 통해 로봇이 올바른 표 화면을 보고 있는지 확인해주세요.")
                 
             except Exception as e:
                 status.update(label="❌ 오류 발생", state="error", expanded=True)
