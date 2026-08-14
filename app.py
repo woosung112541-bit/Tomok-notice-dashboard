@@ -515,7 +515,7 @@ elif menu == "📝 게시판 / 메모장":
 # ==========================================
 elif menu == "🧪 스텔스 테스트 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
-    st.info("단일 페이지(SPA) 구조로 된 한수원(KHNP) 사이트에 접속 후, 로봇이 직접 메뉴를 클릭하여 공고를 가져옵니다.")
+    st.info("단일 페이지(SPA) 구조로 된 한수원(KHNP) 사이트에 접속 후, 3단계 드롭다운 메뉴를 자바스크립트로 강제 격파합니다.")
     
     test_url = st.text_input("타겟 URL (고정)", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
     
@@ -555,13 +555,13 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 st.write(f"🔗 {test_url} 접속 중...")
                 driver.get(test_url)
                 
-                st.write("🖱️ '입찰공고' 메뉴 탐색 및 자동 클릭 시도 중...")
-                # 🌟 핵심: '입찰공고' 라는 글자가 있는 버튼이나 탭을 찾아서 클릭합니다.
-                menu_btn = WebDriverWait(driver, 15).until(
-                    EC.element_to_be_clickable((By.XPATH, "//a[contains(text(), '입찰공고')] | //span[contains(text(), '입찰공고')]"))
+                st.write("🖱️ 최종 목적지 '입찰공고조회' 뼈때리기(JS Click) 시도 중...")
+                # 🌟 핵심 패치: 메뉴가 숨겨져 있어도 DOM에 존재하면 강제로 클릭하는 스크립트
+                target_btn = WebDriverWait(driver, 15).until(
+                    EC.presence_of_element_located((By.XPATH, "//*[contains(text(), '입찰공고조회')]"))
                 )
-                driver.execute_script("arguments[0].click();", menu_btn)
-                time.sleep(3) # 클릭 후 화면 전환(애니메이션) 대기
+                driver.execute_script("arguments[0].click();", target_btn)
+                time.sleep(4) # 클릭 후 화면 전환(애니메이션) 대기
                 
                 st.write("⏳ 클릭 후 내부 컴포넌트(데이터) 렌더링 대기 중...")
                 
@@ -572,7 +572,10 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                     driver.switch_to.frame(iframes[0])
                     time.sleep(2)
 
-                WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr")))
+                try:
+                    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr")))
+                except:
+                    pass # 테이블을 못 찾더라도 일단 아래 파싱 단계로 넘어가서 원인을 확인합니다.
                 
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
                 rows = soup.select("table tbody tr")
