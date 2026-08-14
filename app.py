@@ -8,7 +8,6 @@ import plotly.express as px
 import time
 import re
 from datetime import datetime, timedelta, timezone
-from bs4 import BeautifulSoup
 
 # 한국 표준시(KST) 강제 설정
 KST = timezone(timedelta(hours=9))
@@ -193,7 +192,7 @@ if menu == "공고 자동수집":
         st.write(f"현재 총 {len(df)}개의 공고가 로드되었습니다. (UI 생략)")
 
 # ==========================================
-# 6. 스텔스 테스트 랩 (시한폭탄 지연 클릭 무적 패치 적용)
+# 6. 스텔스 테스트 랩 (화면 텍스트 직독 방식)
 # ==========================================
 elif menu == "🧪 스텔스 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
@@ -217,8 +216,8 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 chrome_options.add_argument("--window-size=1920,1080")
                 chrome_options.add_argument("--lang=ko-KR")
                 
-                # Eager 전략 복구 (None은 렌더링 누락 가능성이 큼)
-                chrome_options.page_load_strategy = 'eager'
+                # 안정적인 렌더링을 위해 기본 로딩 방식으로 원복
+                chrome_options.page_load_strategy = 'normal'
                 
                 chrome_options.add_argument("--disable-blink-features=AutomationControlled")
                 chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
@@ -233,8 +232,6 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                     "acceptLanguage": 'ko-KR,ko;q=0.9'
                 })
                 
-                driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-                
                 st.write("접속 시작 (타임아웃 30초 제한)...")
                 driver.set_page_load_timeout(30)
                 try:
@@ -242,8 +239,8 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 except:
                     st.write("(알림) 로딩 지연으로 강제 진행합니다...")
                 
-                st.write("백그라운드 렌더링 대기 중 (15초)...")
-                time.sleep(15) 
+                st.write("초기 화면 렌더링 대기 중 (10초)...")
+                time.sleep(10) 
                 
                 st.write("팝업 제거 시도...")
                 js_close_popup = """
@@ -258,14 +255,11 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 try: driver.execute_script(js_close_popup); time.sleep(2) 
                 except: pass
                 
-                st.write("입찰공고조회 메뉴 직접 타격 (1초 지연 시한폭탄)...")
-                
-                # 🛑 무적 패치 1: 클릭 명령을 1초(1000ms) 뒤로 미뤄서 데드락 방지
-                js_ultimate_hack = """
+                st.write("입찰공고조회 메뉴 클릭 (가장 안정적이었던 방식)...")
+                js_click = """
                 var plusBtns = document.querySelectorAll('a.plus, a.btn_more, a[title*="더보기"]');
-                if(plusBtns.length > 0) {
-                    setTimeout(function(){ plusBtns[0].click(); }, 1000);
-                    return 'SUCCESS';
+                for(var i=0; i<plusBtns.length; i++) {
+                    try { plusBtns[i].click(); return 'SUCCESS'; } catch(e){}
                 }
                 var els = document.querySelectorAll('a, span, li, button');
                 for(var i=0; i<els.length; i++) {
@@ -273,12 +267,9 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                     if((el.innerText || '').replace(/\\s/g, '').indexOf('입찰공고조회') > -1) {
                         var href = el.getAttribute('href');
                         if(href && href.indexOf('javascript:') > -1) { 
-                            var jsCode = href.replace('javascript:', '');
-                            setTimeout(function(){ eval(jsCode); }, 1000);
-                            return 'SUCCESS'; 
+                            eval(href.replace('javascript:', '')); return 'SUCCESS'; 
                         }
-                        setTimeout(function(){ el.click(); }, 1000);
-                        return 'SUCCESS';
+                        el.click(); return 'SUCCESS';
                     }
                 }
                 return 'NOT_FOUND';
@@ -288,48 +279,33 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 for frame in frames:
                     try:
                         if frame: driver.switch_to.frame(frame)
-                        res = driver.execute_script(js_ultimate_hack)
+                        res = driver.execute_script(js_click)
                         if res == 'SUCCESS':
-                            driver.switch_to.default_content() # 1초 지연 덕분에 파괴되기 전에 안전하게 탈출!
+                            driver.switch_to.default_content()
                             break
                         driver.switch_to.default_content()
-                    except: 
-                        driver.switch_to.default_content()
+                    except: driver.switch_to.default_content()
                 
-                # 클릭이 발생하고 페이지가 넘어갈 때까지 충분히 대기
-                st.write("페이지 이동 및 렌더링 동적 대기 (최대 30초)...")
-                time.sleep(10)
+                st.write("데이터 렌더링 대기 및 검색 버튼 확인 (최대 30초)...")
                 
-                # 비주얼 스크래퍼
-                js_visual_scraper = """
-                var els = document.querySelectorAll('td, span, div, a');
-                var items = [];
-                for(var i=0; i<els.length; i++) {
-                    var el = els[i];
-                    if(el.children.length === 0) {
-                        var txt = el.textContent.trim();
-                        if(txt.length > 0) {
-                            var rect = el.getBoundingClientRect();
-                            if(rect.width > 0 && rect.height > 0) {
-                                items.push({text: txt, y: Math.round(rect.top / 10) * 10, x: Math.round(rect.left)});
-                            }
-                        }
-                    }
-                }
-                var rows = {};
-                items.forEach(function(item) {
-                    if(!rows[item.y]) rows[item.y] = [];
-                    rows[item.y].push(item);
-                });
-                var result = [];
-                for(var y in rows) {
-                    rows[y].sort(function(a, b) { return a.x - b.x; });
-                    var rowTexts = rows[y].map(function(a) { return a.text; });
-                    var uniqueTexts = [...new Set(rowTexts)];
-                    result.push(uniqueTexts.join(' | '));
-                }
-                return result;
-                """
+                # 화면에 보이는 텍스트를 그대로 읽어내는 함수 (대표님의 '사진 분석' 아이디어 반영)
+                def read_screen_text(d):
+                    try:
+                        # 브라우저에 표시된 텍스트 전체를 가져옵니다.
+                        body_text = d.find_element(By.TAG_NAME, 'body').text
+                        lines = body_text.split('\n')
+                        valid_lines = []
+                        
+                        for line in lines:
+                            line = line.strip()
+                            # 공고 데이터가 포함된 줄인지 확인 (길이 20자 이상 + 핵심 단어 포함)
+                            if len(line) > 20 and ('전자입찰' in line or '현장입찰' in line or '입찰진행' in line or re.search(r'[A-Z]\d{2}[A-Z]\d{4,}', line)):
+                                # 띄어쓰기 여러 개를 보기 좋게 ' | ' 로 변환
+                                clean_line = re.sub(r'\s{2,}', ' | ', line)
+                                valid_lines.append(clean_line)
+                        return valid_lines
+                    except:
+                        return []
 
                 res_list = None
                 search_clicked = False
@@ -344,22 +320,10 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                     for frame in frames:
                         try:
                             if frame: driver.switch_to.frame(frame)
-                            visual_rows = driver.execute_script(js_visual_scraper)
+                            raw_lines = read_screen_text(driver)
                             
-                            valid_rows = []
-                            ignore_words = ['인증서', '비밀번호', '조회된 데이터', '표시할 데이터', '구매운영단위', '결과상태', '입찰방식', '공고일자', 'PC 요구사항', 'Microsoft', '회사정보', '입찰관리', 'English', '고객센터']
-                            
-                            if visual_rows:
-                                for row in visual_rows:
-                                    has_notice_num = bool(re.search(r'[A-Z]\d{2}[A-Z]\d{4,}', row))
-                                    has_keyword = any(k in row for k in ['전자입찰', '현장입찰', '공고진행', '입찰진행'])
-                                    
-                                    if len(row) > 30 and row.count('|') >= 4 and not any(w in row for w in ignore_words):
-                                        if has_notice_num or has_keyword:
-                                            valid_rows.append(row)
-                                        
-                            if valid_rows:
-                                unique_rows = list(dict.fromkeys(valid_rows))
+                            if raw_lines:
+                                unique_rows = list(dict.fromkeys(raw_lines))
                                 res_list = [f"[{i+1}] {txt}" for i, txt in enumerate(unique_rows[:15])]
                                 
                             driver.switch_to.default_content()
@@ -370,29 +334,22 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                     if res_list:
                         break 
                         
-                    if attempt == 4 and not search_clicked:
-                        st.write("조회 지연 감지. '검색' 버튼 강제 클릭 (1초 지연)...")
-                        # 🛑 무적 패치 2: 검색 버튼 클릭 시에도 1초 지연 시한폭탄 설치
+                    if attempt == 5 and not search_clicked:
+                        st.write("조회 지연 감지. '검색' 버튼 클릭...")
                         js_search_click = """
                         document.querySelectorAll('a, button, span').forEach(el => {
-                            if((el.innerText || '').trim() === '검색') {
-                                setTimeout(function(){ el.click(); }, 1000);
-                            }
+                            if((el.innerText || '').trim() === '검색') el.click();
                         });
-                        return 'SUCCESS';
                         """
                         for f in frames:
                             try:
                                 if f: driver.switch_to.frame(f)
-                                res = driver.execute_script(js_search_click)
-                                if res == 'SUCCESS':
-                                    driver.switch_to.default_content()
-                                    break
+                                driver.execute_script(js_search_click)
                                 driver.switch_to.default_content()
-                            except: driver.switch_to.default_content()
+                            except: pass
                         search_clicked = True
 
-                st.write("최종 렌더링 화면 캡처 중...")
+                st.write("최종 화면 캡처 중...")
                 try:
                     screenshot = driver.get_screenshot_as_png()
                     st.image(screenshot, caption="최종 확보된 브라우저 화면")
@@ -402,10 +359,10 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 status.update(label="처리 완료", state="complete", expanded=True)
                 
                 if res_list:
-                    st.success(f"데이터 추출 성공 ({len(res_list)}건)")
+                    st.success(f"데이터 텍스트 직독 성공 ({len(res_list)}건)")
                     st.code("\n".join(res_list))
                 else:
-                    st.error("데이터 추출 실패 (조건에 맞는 공고 없음 또는 로딩 지연)")
+                    st.error("화면에서 데이터를 읽어오지 못했습니다. (조건에 맞는 공고 없음 또는 로딩 지연)")
                     
             except Exception as e:
                 status.update(label="오류", state="error", expanded=True)
