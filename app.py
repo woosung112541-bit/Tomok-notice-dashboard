@@ -256,7 +256,7 @@ if menu == "공고 자동수집":
 
     if st.button("공고 수집", type="primary"):
         if manage_sheet_lock("check"):
-            st.warning("⏳ 현재 다른 팀원이 공고 수집을 진행 중입니다. 서버 보호를 위해 잠시 후 새로고침(F5)을 눌러주세요!")
+            st.warning("⏳ 현재 다른 팀원이 공고를 수집하고 있습니다. 서버 보호를 위해 잠시 후 새로고침(F5)을 눌러주세요!")
         else:
             if "빠른" in engine_choice: target_script = "main_pure.py"
             elif "정밀" in engine_choice: target_script = "main.py"
@@ -511,11 +511,11 @@ elif menu == "📝 게시판 / 메모장":
         st.write("아직 등록된 메모가 없습니다.")
 
 # ==========================================
-# 6. 🧪 스텔스 테스트 랩 (스마트 로딩 대기 & 검색 강제 클릭 완결판)
+# 6. 🧪 스텔스 테스트 랩 (가짜 데이터 필터링 완벽 적용본)
 # ==========================================
 elif menu == "🧪 스텔스 테스트 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
-    st.info("표가 렌더링될 때까지 지속적으로 감시하며, 필요시 '검색' 버튼을 강제로 눌러 데이터를 뽑아냅니다.")
+    st.info("표가 렌더링될 때 검색 필터 껍데기에 속지 않고 진짜 데이터가 나올 때까지 끈질기게 감시합니다.")
     
     test_url = st.text_input("타겟 URL (고정)", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
     
@@ -583,7 +583,7 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 st.write("📸 1. 팝업 제거 후 메인 화면 확보 중...")
                 st.image(driver.get_screenshot_as_png(), caption="1. 팝업창이 닫힌 메인 화면")
                 
-                st.write("🖱️ 3단 메뉴를 버리고, 메인 화면의 '더보기(+)' 버튼 직통 스나이핑 시도 중...")
+                st.write("🖱️ 3단 메뉴를 버리고, 메인 위젯의 '더보기(+)' 버튼 직통 스나이핑 시도 중...")
                 js_ultimate_hack = """
                 function ultimateHack() {
                     var plusBtns = document.querySelectorAll('a.plus, a.btn_more, a.more, a[title*="더보기"], img[alt*="더보기"]');
@@ -647,8 +647,8 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 else:
                     st.warning("⚠️ 지름길 버튼(+)과 메뉴를 모두 찾지 못했습니다.")
                 
-                # 🌟 무적 패치: 스마트 로딩 대기 루프 (최대 20초 감시)
-                st.write("⏳ 로딩 스피너(동그라미) 대기 및 데이터 추출 진행 중 (최대 20초)...")
+                # 🌟 핵심 패치: 가짜 데이터(검색 필터 헤더)를 거르고 진짜 데이터만 기다리도록 필터링 강화
+                st.write("⏳ 로딩 스피너(동그라미) 대기 및 진짜 데이터 추출 진행 중 (최대 20초)...")
                 
                 res_list = None
                 search_clicked = False
@@ -665,10 +665,13 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                             rows = soup.select("table tbody tr")
                             
                             valid_rows = []
+                            # 가짜 데이터 필터링 조건 추가
+                            ignore_words = ['인증서', '비밀번호', '조회된 데이터가 없습니다', '표시할 데이터가 없습니다', '구매운영단위', '결과상태', '공고일자']
+                            
                             for r in rows:
                                 text = r.get_text(separator=' | ', strip=True)
-                                # 쓰레기 텍스트 걸러내기
-                                if '인증서' not in text and '비밀번호' not in text and '조회된 데이터가 없습니다' not in text and '표시할 데이터가 없습니다' not in text and len(text) > 20:
+                                # 쓰레기 텍스트(검색 폼, 에러 메시지)가 포함되지 않고 길이가 긴 텍스트만 진짜로 취급
+                                if not any(word in text for word in ignore_words) and len(text) > 20:
                                     valid_rows.append(text)
                             
                             if len(valid_rows) > 0:
@@ -689,8 +692,8 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                         js_search_click = """
                         var btns = document.querySelectorAll('a, button, span');
                         for(var i=0; i<btns.length; i++){
-                            var txt = btns[i].innerText || btns[i].textContent;
-                            if(txt && txt.trim() === '검색') {
+                            var txt = (btns[i].innerText || btns[i].textContent || '').trim();
+                            if(txt === '검색') {
                                 btns[i].click(); return true;
                             }
                         } return false;
@@ -715,7 +718,7 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                     st.success(f"✅ 성공! 총 {len(res_list)}개의 공고 데이터를 끄집어냈습니다.")
                     st.code("\n".join(res_list))
                 else:
-                    st.error("데이터를 찾을 수 없습니다. 계속 로딩 중이거나 조회된 공고가 없을 수 있습니다.")
+                    st.error("데이터를 찾을 수 없습니다. 계속 로딩 중이거나 조건에 맞는 공고가 없을 수 있습니다.")
                 
             except Exception as e:
                 status.update(label="❌ 오류 발생", state="error", expanded=True)
