@@ -6,6 +6,7 @@ import sys
 import gspread
 import plotly.express as px
 import time
+import re
 from datetime import datetime, timedelta, timezone
 from bs4 import BeautifulSoup
 
@@ -195,7 +196,7 @@ if menu == "공고 자동수집":
         st.write(f"현재 총 {len(df)}개의 공고가 로드되었습니다. (UI 생략)")
 
 # ==========================================
-# 6. 스텔스 테스트 랩
+# 6. 스텔스 테스트 랩 (추출 로직 전면 개편)
 # ==========================================
 elif menu == "🧪 스텔스 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
@@ -264,40 +265,40 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 time.sleep(2)
                 driver.execute_script("window.dispatchEvent(new Event('resize'));")
                 
+                # HTML 구조(태그) 의존성을 완전히 배제하고, 순차적인 텍스트 배열에서 윈도우 슬라이딩 방식으로 데이터 추출
                 def extract_data(d):
                     soup = BeautifulSoup(d.page_source, 'html.parser')
-                    rows = soup.find_all("tr")
-                    valid = []
-                    ignore = ['인증서', '비밀번호', '조회된 데이터가 없습니다', '표시할 데이터가 없습니다', 
-                              '구매운영단위', '결과상태', '입찰방식', '공고일자', '공고차수', '정정/취소사유',
-                              'PC 요구사항', '운영체제', 'Microsoft', '브라우저']
+                    # 페이지 내의 모든 가시적 텍스트를 순서대로 리스트화
+                    strings = list(soup.stripped_strings)
+                    valid_rows = []
                     
-                    for r in rows:
-                        text = r.get_text(separator=' | ', strip=True)
-                        if len(text) > 30 and text.count('|') >= 5 and not any(w in text for w in ignore):
-                            valid.append(text)
+                    for i, s in enumerate(strings):
+                        # 공고 데이터의 핵심 키워드를 트리거로 사용
+                        if s in ['입찰진행', '공고진행', '전자입찰', '현장입찰']:
+                            # 해당 키워드 주변의 텍스트 조각들을 묶어 하나의 행(Row)으로 간주
+                            start_idx = max(0, i - 3)
+                            end_idx = min(len(strings), i + 15)
+                            chunk = strings[start_idx:end_idx]
                             
-                    # tr 태그로 못 찾을 경우 텍스트 노드 탐색 (div 그리드 대응)
-                    if not valid:
-                        for el in soup.find_all(string=lambda t: t and ('전자입찰' in t or '현장입찰' in t or '입찰진행' in t)):
-                            parent = el.find_parent()
-                            for _ in range(5):
-                                if parent:
-                                    text = parent.get_text(separator=' | ', strip=True)
-                                    if len(text) > 30 and text.count('|') >= 5 and not any(w in text for w in ignore):
-                                        valid.append(text)
-                                        break
-                                parent = parent.find_parent()
+                            # 공고번호 정규식 패턴 확인 (예: U26S156000)
+                            has_notice_num = any(re.match(r'^[A-Z][0-9A-Z]{8,11}$', x) for x in chunk)
+                            
+                            if has_notice_num:
+                                row_str = " | ".join(chunk)
+                                # 중복 수집 방지 (앞 5개 요소가 동일하면 같은 행으로 취급)
+                                prefix = " | ".join(chunk[:5])
+                                if not any(v.startswith(prefix) for v in valid_rows):
+                                    valid_rows.append(row_str)
 
-                    unique = list(dict.fromkeys(valid))
-                    if unique: return [f"[{i+1}] {t}" for i, t in enumerate(unique[:15])]
+                    if valid_rows:
+                        return [f"[{idx+1}] {text}" for idx, text in enumerate(valid_rows[:20])]
                     return None
 
                 st.write("데이터 렌더링 동적 대기 (최대 30초)...")
                 res_list = None
                 search_clicked = False
                 
-                for attempt in range(15): # 2초씩 15번 = 최대 30초
+                for attempt in range(15):
                     time.sleep(2)
                     driver.execute_script("window.dispatchEvent(new Event('resize'));")
                     
