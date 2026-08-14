@@ -8,7 +8,6 @@ import plotly.express as px
 import time
 import re
 from datetime import datetime, timedelta, timezone
-from bs4 import BeautifulSoup
 
 # 한국 표준시(KST) 강제 설정
 KST = timezone(timedelta(hours=9))
@@ -183,12 +182,12 @@ def render_notice_table(df, key_prefix):
 # 사이드바 메뉴 설정
 # ==========================================
 st.sidebar.title("📌 메뉴 선택")
-menu = st.sidebar.radio("이동할 메뉴를 선택하세요:", ["공고 자동수집", "공고 통계", "🎯 타겟 공고", "사이트 검토 필요", "📝 게시판", "🧪 스텔스 랩 (한수원)"])
+menu = st.sidebar.radio(
+    "이동할 메뉴를 선택하세요:",
+    ["공고 자동수집", "공고 통계 및 분석", "🎯 타겟 공고", "사이트 검토 필요", "📝 게시판", "🧪 스텔스 랩 (한수원)"]
+)
 st.sidebar.divider()
 
-# ==========================================
-# 1. 공고 자동수집 메뉴
-# ==========================================
 if menu == "공고 자동수집":
     st.title("🚀 공고 자동 수집 & 실시간 검색")
     df = get_google_sheet("notices")
@@ -196,10 +195,11 @@ if menu == "공고 자동수집":
         st.write(f"현재 총 {len(df)}개의 공고가 로드되었습니다. (UI 생략)")
 
 # ==========================================
-# 6. 스텔스 테스트 랩 (중첩 프레임 및 역추적 추출 적용)
+# 6. 🧪 스텔스 테스트 랩 (Eager Loading & 타임아웃 예외처리 적용)
 # ==========================================
 elif menu == "🧪 스텔스 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
+    
     test_url = st.text_input("타겟 URL", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
     
     if st.button("🚀 침투 시작", type="primary"):
@@ -219,6 +219,9 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 chrome_options.add_argument("--window-size=1920,1080")
                 chrome_options.add_argument("--lang=ko-KR")
                 
+                # 🛑 핵심 수정 1: 무한 로딩 방지를 위한 Eager 전략 (DOM만 로드되면 바로 진행)
+                chrome_options.page_load_strategy = 'eager'
+                
                 try: service = Service('/usr/bin/chromedriver')
                 except: service = Service(ChromeDriverManager().install())
                 driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -229,87 +232,92 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 })
                 
                 st.write("접속 및 대기 중...")
-                driver.get(test_url)
-                time.sleep(10) 
+                
+                # 🛑 핵심 수정 2: 강제 타임아웃 설정 (최대 30초) 및 예외 무시
+                driver.set_page_load_timeout(30)
+                try:
+                    driver.get(test_url)
+                except Exception as e:
+                    st.write(f"(알림) 페이지 로딩 타임아웃 발생, 강제 스킵 진행...")
+                
+                time.sleep(5) 
                 
                 st.write("팝업 제거 중...")
-                js_close = "document.querySelectorAll('a, button, span, img').forEach(el => { var t = (el.innerText||'').trim(); var a = (el.getAttribute('alt')||'').trim(); if(['닫기','하루동안 열지 않기','X','close'].includes(t) || ['닫기','close'].includes(a)) el.click(); });"
-                try: driver.execute_script(js_close); time.sleep(1)
+                js_close_popup = """
+                document.querySelectorAll('a, button, span, img').forEach(el => {
+                    var t = (el.innerText || '').trim();
+                    var a = (el.getAttribute('alt') || '').trim();
+                    if(['닫기', '하루동안 열지 않기', 'X', 'close'].includes(t) || ['닫기', 'close'].includes(a)) {
+                        el.click();
+                    }
+                });
+                """
+                try: driver.execute_script(js_close_popup); time.sleep(1) 
                 except: pass
                 
-                st.write("메뉴 탐색 및 클릭 시도...")
-                js_click = """
-                var btns = document.querySelectorAll('a.plus, a.btn_more, a[title*="더보기"]');
-                for(var i=0; i<btns.length; i++) { try { btns[i].click(); return '더보기 클릭'; } catch(e){} }
+                st.write("메뉴 탐색 및 클릭 시도 중...")
+                js_ultimate_hack = """
+                var plusBtns = document.querySelectorAll('a.plus, a.btn_more, a[title*="더보기"]');
+                for(var i=0; i<plusBtns.length; i++) {
+                    try { plusBtns[i].click(); return 'SUCCESS: 더보기 클릭'; } catch(e){}
+                }
                 var els = document.querySelectorAll('a, span, li, button');
                 for(var i=0; i<els.length; i++) {
-                    if((els[i].innerText||'').replace(/\\s/g, '').indexOf('입찰공고조회') > -1) {
+                    if((els[i].innerText || '').replace(/\\s/g, '').indexOf('입찰공고조회') > -1) {
                         var href = els[i].getAttribute('href');
-                        if(href && href.indexOf('javascript:') > -1) { eval(href.replace('javascript:','')); return 'JS 실행'; }
-                        els[i].click(); return '직접 클릭';
+                        if(href && href.indexOf('javascript:') > -1) { eval(href.replace('javascript:', '')); return 'SUCCESS: JS 실행'; }
+                        els[i].click(); return 'SUCCESS: 직접 클릭';
                     }
-                } return '실패';
+                }
+                return 'NOT_FOUND';
                 """
                 
                 frames = [None] + driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
-                for f in frames:
+                for frame in frames:
                     try:
-                        if f: driver.switch_to.frame(f)
-                        res = driver.execute_script(js_click)
-                        if res != '실패':
+                        if frame: driver.switch_to.frame(frame)
+                        res = driver.execute_script(js_ultimate_hack)
+                        if 'SUCCESS' in res:
                             driver.switch_to.default_content()
                             break
                         driver.switch_to.default_content()
                     except: driver.switch_to.default_content()
                 
-                # HTML 소스 기반 데이터 역추적 추출 함수
-                def extract_data_from_source(source):
-                    soup = BeautifulSoup(source, 'html.parser')
-                    valid_rows = []
-                    ignore = ['인증서', '비밀번호', '조회된 데이터', '구매운영단위', '결과상태', 'PC 요구사항', 'Microsoft', '회사정보', 'English', '고객센터']
-                    
-                    # 1. TR 태그 검사
-                    for tr in soup.find_all('tr'):
-                        text = tr.get_text(separator=' | ', strip=True)
-                        text = re.sub(r'(\|\s*){2,}', '| ', text)
-                        if len(text) > 30 and text.count('|') >= 4 and not any(w in text for w in ignore):
-                            if '입찰진행' in text or '공고진행' in text or '전자입찰' in text or '현장입찰' in text:
-                                valid_rows.append(text)
-                    
-                    if valid_rows: return valid_rows
-                    
-                    # 2. 정규식 패턴 역추적 검사 (TR 태그 외의 파편화 구조 대응)
-                    # 공고번호 패턴: 영대문자 1자리 + 숫자 2자리 + 영대문자 1자리 + 숫자 5자리 이상
-                    for el in soup.find_all(string=re.compile(r'[A-Z]\d{2}[A-Z]\d{5,}')):
-                        parent = el.find_parent()
-                        for _ in range(5): # 부모 노드를 최대 5단계까지 역추적하여 묶음
-                            if parent:
-                                text = parent.get_text(separator=' | ', strip=True)
-                                text = re.sub(r'(\|\s*){2,}', '| ', text)
-                                if len(text) > 30 and text.count('|') >= 4 and not any(w in text for w in ignore):
-                                    valid_rows.append(text)
-                                    break
-                            parent = parent.find_parent() if parent else None
-                    
-                    return valid_rows
-
-                # 재귀적(Recursive) 다중 중첩 프레임 탐색 함수
-                def recursive_extract(d):
-                    data = extract_data_from_source(d.page_source)
-                    if data: return data
-                    
-                    frames = d.find_elements(By.TAG_NAME, "iframe") + d.find_elements(By.TAG_NAME, "frame")
-                    for i in range(len(frames)):
-                        try:
-                            d.switch_to.frame(i)
-                            child_data = recursive_extract(d)
-                            d.switch_to.parent_frame()
-                            if child_data: return child_data
-                        except:
-                            d.switch_to.parent_frame()
-                    return []
+                # 🛑 핵심 수정 3: 스크래퍼 경량화 (TreeWalker 제거, 말단 노드만 검색)
+                js_visual_scraper = """
+                var els = document.querySelectorAll('td, span, div, a');
+                var items = [];
+                for(var i=0; i<els.length; i++) {
+                    var el = els[i];
+                    if(el.children.length === 0) {
+                        var txt = el.textContent.trim();
+                        if(txt.length > 0) {
+                            var rect = el.getBoundingClientRect();
+                            if(rect.width > 0 && rect.height > 0) {
+                                // Y좌표를 10px 단위로 버림하여 동일 라인 그룹화
+                                items.push({text: txt, y: Math.round(rect.top / 10) * 10, x: Math.round(rect.left)});
+                            }
+                        }
+                    }
+                }
+                var rows = {};
+                items.forEach(function(item) {
+                    if(!rows[item.y]) rows[item.y] = [];
+                    rows[item.y].push(item);
+                });
+                var result = [];
+                for(var y in rows) {
+                    rows[y].sort(function(a, b) { return a.x - b.x; });
+                    var rowTexts = rows[y].map(function(a) { return a.text; });
+                    // 중복 텍스트 제거
+                    var uniqueTexts = [...new Set(rowTexts)];
+                    result.push(uniqueTexts.join(' | '));
+                }
+                return result;
+                """
 
                 st.write("데이터 렌더링 동적 대기 (최대 30초)...")
+                
                 res_list = None
                 search_clicked = False
                 
@@ -317,45 +325,66 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                     time.sleep(2)
                     driver.execute_script("window.dispatchEvent(new Event('resize'));")
                     
-                    # 최상단 프레임부터 재귀적으로 전체 탐색
-                    driver.switch_to.default_content()
-                    raw_data = recursive_extract(driver)
+                    frames = [None] + driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
                     
-                    if raw_data:
-                        unique_rows = list(dict.fromkeys(raw_data))
-                        res_list = [f"[{i+1}] {txt}" for i, txt in enumerate(unique_rows[:15])]
-                        break
+                    for frame in frames:
+                        try:
+                            if frame: driver.switch_to.frame(frame)
+                            visual_rows = driver.execute_script(js_visual_scraper)
+                            
+                            valid_rows = []
+                            ignore_words = ['인증서', '비밀번호', '조회된 데이터', '표시할 데이터', '구매운영단위', '결과상태', '입찰방식', '공고일자', 'PC 요구사항', 'Microsoft', '회사정보', '입찰관리', 'English', '고객센터']
+                            
+                            if visual_rows:
+                                for row in visual_rows:
+                                    has_notice_num = bool(re.search(r'[A-Z]\d{2}[A-Z]\d{4,}', row))
+                                    has_keyword = any(k in row for k in ['전자입찰', '현장입찰', '공고진행', '입찰진행'])
+                                    
+                                    if len(row) > 30 and row.count('|') >= 4 and not any(w in row for w in ignore_words):
+                                        if has_notice_num or has_keyword:
+                                            valid_rows.append(row)
+                                        
+                            if valid_rows:
+                                unique_rows = list(dict.fromkeys(valid_rows))
+                                res_list = [f"[{i+1}] {txt}" for i, txt in enumerate(unique_rows[:15])]
+                                
+                            driver.switch_to.default_content()
+                            if res_list: break
+                        except:
+                            driver.switch_to.default_content()
+                    
+                    if res_list:
+                        break 
                         
                     if attempt == 4 and not search_clicked:
-                        st.write("자동 조회 지연 감지. '검색' 버튼 강제 클릭...")
-                        js_search = "document.querySelectorAll('a, button, span').forEach(e=>{if((e.innerText||'').trim()==='검색')e.click()});"
-                        
-                        def click_search_all(d):
-                            try: d.execute_script(js_search)
+                        st.write("조회 지연 감지. '검색' 버튼 강제 클릭...")
+                        js_search_click = """
+                        document.querySelectorAll('a, button, span').forEach(el => {
+                            if((el.innerText || '').trim() === '검색') el.click();
+                        });
+                        """
+                        for f in frames:
+                            try:
+                                if f: driver.switch_to.frame(f)
+                                driver.execute_script(js_search_click)
+                                driver.switch_to.default_content()
                             except: pass
-                            frames = d.find_elements(By.TAG_NAME, "iframe") + d.find_elements(By.TAG_NAME, "frame")
-                            for i in range(len(frames)):
-                                try:
-                                    d.switch_to.frame(i)
-                                    click_search_all(d)
-                                    d.switch_to.parent_frame()
-                                except: d.switch_to.parent_frame()
-                                
-                        driver.switch_to.default_content()
-                        click_search_all(driver)
                         search_clicked = True
 
-                st.image(driver.get_screenshot_as_png(), caption="추출 완료 시점 렌더링 화면")
+                st.write("최종 렌더링 화면 캡처 중...")
+                st.image(driver.get_screenshot_as_png())
+                
                 status.update(label="처리 완료", state="complete", expanded=True)
                 
                 if res_list:
                     st.success(f"데이터 추출 성공 ({len(res_list)}건)")
                     st.code("\n".join(res_list))
                 else:
-                    st.error("데이터 추출 실패 (시간 초과 또는 조건에 맞는 공고 없음)")
+                    st.error("데이터 추출 실패 (조건에 맞는 공고 없음 또는 로딩 지연)")
                     
             except Exception as e:
                 status.update(label="오류", state="error", expanded=True)
                 st.error(f"상세 에러: {e}")
             finally:
-                if 'driver' in locals() and driver is not None: driver.quit()
+                if 'driver' in locals() and driver is not None:
+                    driver.quit()
