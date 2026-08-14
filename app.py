@@ -190,13 +190,12 @@ st.sidebar.divider()
 # ==========================================
 if menu == "공고 자동수집":
     st.title("🚀 공고 자동 수집 & 실시간 검색")
-    # 기존 코드 동일 유지 (분량상 인터페이스만 간략 표시, 실제는 기존과 동일하게 작동)
     df = get_google_sheet("notices")
     if not df.empty:
         st.write(f"현재 총 {len(df)}개의 공고가 로드되었습니다. (UI 생략, 기능 유지)")
 
 # ==========================================
-# 6. 스텔스 테스트 랩 (핵심 수정 부분)
+# 6. 스텔스 테스트 랩 (렌더링 엔진 및 리사이즈 패치)
 # ==========================================
 elif menu == "🧪 스텔스 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
@@ -213,10 +212,11 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                 import time
                 
                 chrome_options = Options()
-                chrome_options.add_argument("--headless") 
+                # 🛑 핵심 수정 1: 최신 렌더링 엔진 사용 (그리드 찌그러짐 방지)
+                chrome_options.add_argument("--headless=new") 
                 chrome_options.add_argument("--no-sandbox")
                 chrome_options.add_argument("--disable-dev-shm-usage")
-                chrome_options.add_argument("--window-size=1920x1080")
+                chrome_options.add_argument("--window-size=1920,1080")
                 chrome_options.add_argument("--lang=ko-KR")
                 
                 try: service = Service('/usr/bin/chromedriver')
@@ -262,22 +262,21 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                         driver.switch_to.default_content()
                     except: driver.switch_to.default_content()
                 
-                # 핵심 변경: 진행률 로딩바 무시를 위한 10초 하드 슬립 추가
-                st.write("로딩 바(20% 등) 및 데이터 렌더링 대기 (고정 10초)...")
+                st.write("로딩 바 대기 및 표 UI 강제 전개 (고정 10초)...")
+                # 🛑 핵심 수정 2: 창 크기를 강제로 인식시켜 찌그러진 UI(Grid)를 다시 펴줌
+                driver.execute_script("window.dispatchEvent(new Event('resize'));")
                 time.sleep(10)
                 
                 def extract_data(d):
                     soup = BeautifulSoup(d.page_source, 'html.parser')
-                    rows = soup.find_all("tr")
+                    rows = soup.find_all(["tr", "div"]) # tr이 없으면 div라도 찾도록 범위 확대
                     valid = []
-                    # 금지어에 PC 요구사항, 운영체제 추가
                     ignore = ['인증서', '비밀번호', '조회된 데이터가 없습니다', '표시할 데이터가 없습니다', 
                               '구매운영단위', '결과상태', '입찰방식', '공고일자', '공고차수', '정정/취소사유',
                               'PC 요구사항', '운영체제', 'Microsoft']
                     
                     for r in rows:
                         text = r.get_text(separator=' | ', strip=True)
-                        # 핵심 변경: 파이프(|) 개수가 5개 이상이어야 실제 그리드 표 데이터로 인정
                         if len(text) > 30 and text.count('|') >= 5 and not any(w in text for w in ignore):
                             valid.append(text)
                             
@@ -286,8 +285,9 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                     return None
 
                 res_list = None
-                for _ in range(3): # 최대 3번 시도 (이미 10초 기다렸으므로 짧게 체크)
+                for _ in range(3): 
                     time.sleep(2)
+                    driver.execute_script("window.dispatchEvent(new Event('resize'));") # 반복 새로고침
                     frames = [None] + driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
                     for f in frames:
                         try:
@@ -298,7 +298,7 @@ elif menu == "🧪 스텔스 랩 (한수원)":
                         except: driver.switch_to.default_content()
                     if res_list: break
 
-                st.image(driver.get_screenshot_as_png(), caption="최종 렌더링 화면")
+                st.image(driver.get_screenshot_as_png(), caption="최종 렌더링 화면 (표가 정상적으로 펼쳐졌는지 확인)")
                 status.update(label="완료!", state="complete", expanded=True)
                 
                 if res_list:
