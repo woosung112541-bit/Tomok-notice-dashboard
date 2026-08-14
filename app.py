@@ -256,7 +256,7 @@ if menu == "공고 자동수집":
 
     if st.button("공고 수집", type="primary"):
         if manage_sheet_lock("check"):
-            st.warning("⏳ 현재 다른 팀원이 공고를 수집하고 있습니다. 서버 보호를 위해 잠시 후 새로고침(F5)을 눌러주세요!")
+            st.warning("⏳ 현재 다른 팀원이 공고 수집을 진행 중입니다. 서버 보호를 위해 잠시 후 새로고침(F5)을 눌러주세요!")
         else:
             if "빠른" in engine_choice: target_script = "main_pure.py"
             elif "정밀" in engine_choice: target_script = "main.py"
@@ -511,11 +511,11 @@ elif menu == "📝 게시판 / 메모장":
         st.write("아직 등록된 메모가 없습니다.")
 
 # ==========================================
-# 6. 🧪 스텔스 테스트 랩 (엔지니어 직관 100% 무적 패치)
+# 6. 🧪 스텔스 테스트 랩 (스마트 로딩 대기 & 검색 강제 클릭 완결판)
 # ==========================================
 elif menu == "🧪 스텔스 테스트 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
-    st.info("어려운 3단 메뉴를 과감히 버리고, 중앙에 있는 더보기(+) 버튼을 스나이핑하여 바로 뚫어냅니다.")
+    st.info("표가 렌더링될 때까지 지속적으로 감시하며, 필요시 '검색' 버튼을 강제로 눌러 데이터를 뽑아냅니다.")
     
     test_url = st.text_input("타겟 URL (고정)", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
     
@@ -583,20 +583,15 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 st.write("📸 1. 팝업 제거 후 메인 화면 확보 중...")
                 st.image(driver.get_screenshot_as_png(), caption="1. 팝업창이 닫힌 메인 화면")
                 
-                st.write("🖱️ 3단 메뉴를 버리고, 메인 위젯의 '더보기(+)' 버튼 직통 스나이핑 시도 중...")
-                
-                # 🌟 무적 패치: Hover 없이 지름길(+) 버튼 또는 강제 렌더링 후 클릭!
+                st.write("🖱️ 3단 메뉴를 버리고, 메인 화면의 '더보기(+)' 버튼 직통 스나이핑 시도 중...")
                 js_ultimate_hack = """
                 function ultimateHack() {
-                    // 전략 1: 메인 화면의 [+] 또는 [더보기] 아이콘 스나이핑
                     var plusBtns = document.querySelectorAll('a.plus, a.btn_more, a.more, a[title*="더보기"], img[alt*="더보기"]');
                     for(var i=0; i<plusBtns.length; i++) {
                         var el = plusBtns[i];
                         if(el.tagName !== 'A' && el.closest('a')) el = el.closest('a');
-                        
                         var href = el.getAttribute('href');
                         var onclick = el.getAttribute('onclick');
-                        
                         try {
                             if(onclick) { eval(onclick); return 'SUCCESS: 더보기(+) 스크립트 실행'; }
                             if(href && href.indexOf('javascript:') > -1) { eval(href.replace('javascript:', '')); return 'SUCCESS: 더보기(+) JS 링크 실행'; }
@@ -605,7 +600,6 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                         } catch(e) { el.click(); return 'SUCCESS: 더보기(+) 단순 클릭(예외)'; }
                     }
 
-                    // 전략 2: Plan B. 3단 메뉴 강제 펼침 후 '입찰공고조회' 찌르기
                     var hiddenElems = document.querySelectorAll('*');
                     for(var i=0; i<hiddenElems.length; i++) {
                         var style = window.getComputedStyle(hiddenElems[i]);
@@ -618,10 +612,8 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                         if(txt.indexOf('입찰공고조회') > -1) {
                             var el = els[i];
                             if(el.tagName !== 'A' && el.closest('a')) el = el.closest('a');
-                            
                             var href = el.getAttribute('href');
                             var onclick = el.getAttribute('onclick');
-                            
                             try {
                                 if(onclick) { eval(onclick); return 'SUCCESS: 입찰공고조회 스크립트 실행'; }
                                 if(href && href.indexOf('javascript:') > -1) { eval(href.replace('javascript:', '')); return 'SUCCESS: 입찰공고조회 JS 링크 실행'; }
@@ -651,44 +643,71 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                         driver.switch_to.default_content()
                 
                 if combo_msg != "실패":
-                    st.success(f"🎯 지름길 타격 적중! ({combo_msg}) 넉넉히 7초 대기합니다...")
-                    time.sleep(7) # 넉넉하게 대기
+                    st.success(f"🎯 지름길 타격 적중! ({combo_msg})")
                 else:
                     st.warning("⚠️ 지름길 버튼(+)과 메뉴를 모두 찾지 못했습니다.")
                 
-                st.write("📸 2. 타격 성공(또는 대기) 후 진입한 화면 확보 중...")
-                st.image(driver.get_screenshot_as_png(), caption="2. 메뉴 클릭 후 진입한 화면 (진짜 입찰공고 표가 보이는지 확인하세요!)")
+                # 🌟 무적 패치: 스마트 로딩 대기 루프 (최대 20초 감시)
+                st.write("⏳ 로딩 스피너(동그라미) 대기 및 데이터 추출 진행 중 (최대 20초)...")
                 
-                st.write("⏳ 내부 표(Table) 데이터 추출 중...")
+                res_list = None
+                search_clicked = False
                 
-                def extract_table_data(d):
-                    soup = BeautifulSoup(d.page_source, 'html.parser')
-                    rows = soup.select("table tbody tr")
-                    if len(rows) > 0:
-                        valid_rows = []
-                        for r in rows:
-                            text = r.get_text(separator=' | ', strip=True)
-                            if '인증서' not in text and '비밀번호' not in text and len(text) > 20:
-                                valid_rows.append(text)
-                        
-                        if valid_rows:
-                            return [f"[{idx+1}] " + txt for idx, txt in enumerate(valid_rows[:15])]
-                    return None
-                
-                res_list = extract_table_data(driver)
-                
-                if not res_list:
-                    frames = driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
-                    for i in range(len(frames)):
+                for attempt in range(20):
+                    time.sleep(1)
+                    frames = [None] + driver.find_elements(By.TAG_NAME, "iframe") + driver.find_elements(By.TAG_NAME, "frame")
+                    
+                    found_valid_data = False
+                    for frame in frames:
                         try:
-                            driver.switch_to.frame(i)
-                            res_list = extract_table_data(driver)
-                            if res_list:
+                            if frame: driver.switch_to.frame(frame)
+                            soup = BeautifulSoup(driver.page_source, 'html.parser')
+                            rows = soup.select("table tbody tr")
+                            
+                            valid_rows = []
+                            for r in rows:
+                                text = r.get_text(separator=' | ', strip=True)
+                                # 쓰레기 텍스트 걸러내기
+                                if '인증서' not in text and '비밀번호' not in text and '조회된 데이터가 없습니다' not in text and '표시할 데이터가 없습니다' not in text and len(text) > 20:
+                                    valid_rows.append(text)
+                            
+                            if len(valid_rows) > 0:
+                                res_list = [f"[{i+1}] " + txt for i, txt in enumerate(valid_rows[:15])]
+                                found_valid_data = True
                                 driver.switch_to.default_content()
                                 break
                             driver.switch_to.default_content()
                         except:
                             driver.switch_to.default_content()
+                    
+                    if found_valid_data:
+                        break # 진짜 데이터를 찾았으면 20초를 안 기다리고 즉시 탈출!
+                        
+                    # 7초가 지났는데도 스피너가 안 멈추거나 데이터가 없으면 '검색' 버튼 강제 클릭!
+                    if attempt == 7 and not search_clicked:
+                        st.write("🔄 자동 조회가 지연되어 '검색' 버튼을 강제 클릭합니다...")
+                        js_search_click = """
+                        var btns = document.querySelectorAll('a, button, span');
+                        for(var i=0; i<btns.length; i++){
+                            var txt = btns[i].innerText || btns[i].textContent;
+                            if(txt && txt.trim() === '검색') {
+                                btns[i].click(); return true;
+                            }
+                        } return false;
+                        """
+                        for frame in frames:
+                            try:
+                                if frame: driver.switch_to.frame(frame)
+                                if driver.execute_script(js_search_click):
+                                    search_clicked = True
+                                    driver.switch_to.default_content()
+                                    break
+                                driver.switch_to.default_content()
+                            except:
+                                driver.switch_to.default_content()
+
+                st.write("📸 2. 최종 렌더링된 화면 확보 중...")
+                st.image(driver.get_screenshot_as_png(), caption="2. 데이터 로딩이 완료된 화면 (스피너가 사라졌는지 확인하세요!)")
                 
                 status.update(label="✅ 침투 및 추출 완료!", state="complete", expanded=True)
                 
@@ -696,7 +715,7 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                     st.success(f"✅ 성공! 총 {len(res_list)}개의 공고 데이터를 끄집어냈습니다.")
                     st.code("\n".join(res_list))
                 else:
-                    st.error("데이터를 찾을 수 없습니다. 출력된 두 번째 스크린샷에 진짜 표가 보이는지 확인해주세요.")
+                    st.error("데이터를 찾을 수 없습니다. 계속 로딩 중이거나 조회된 공고가 없을 수 있습니다.")
                 
             except Exception as e:
                 status.update(label="❌ 오류 발생", state="error", expanded=True)
