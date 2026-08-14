@@ -256,7 +256,7 @@ if menu == "공고 자동수집":
 
     if st.button("공고 수집", type="primary"):
         if manage_sheet_lock("check"):
-            st.warning("⏳ 현재 다른 팀원이 공고 수집을 진행 중입니다. 서버 보호를 위해 잠시 후 새로고침(F5)을 눌러주세요!")
+            st.warning("⏳ 현재 다른 팀원이 공고를 수집하고 있습니다. 서버 보호를 위해 잠시 후 새로고침(F5)을 눌러주세요!")
         else:
             if "빠른" in engine_choice: target_script = "main_pure.py"
             elif "정밀" in engine_choice: target_script = "main.py"
@@ -386,7 +386,7 @@ elif menu == "공고 통계 및 분석":
                 valid_specials = df['특이사항'].astype(str).str.strip()
                 special_df = df[~valid_specials.str.lower().isin(ignore_words)]
                 if not special_df.empty:
-                    specials_list = df['특이사항'].astype(str).str.replace('🔥', '').str.replace('🔴', '').str.replace('🔵', '').str.split(',')
+                    specials_list = special_df['특이사항'].astype(str).str.replace('🔥', '').str.replace('🔴', '').str.replace('🔵', '').str.split(',')
                     all_specials = [item.strip() for sublist in specials_list if isinstance(sublist, list) for item in sublist if item.strip() and item.strip().lower() not in ignore_words]
                     if all_specials: st.bar_chart(pd.Series(all_specials).value_counts().head(10))
         st.divider()
@@ -511,11 +511,11 @@ elif menu == "📝 게시판 / 메모장":
         st.write("아직 등록된 메모가 없습니다.")
 
 # ==========================================
-# 6. 🧪 스텔스 테스트 랩 (TH 태그 원천 차단 무적 패치)
+# 6. 🧪 스텔스 테스트 랩 (TH 무시 및 텍스트 100% 필터링 완결판)
 # ==========================================
 elif menu == "🧪 스텔스 테스트 랩 (한수원)":
     st.title("🧪 스텔스 봇 침투 테스트 랩")
-    st.info("표의 제목(머리글)을 제외하고, 진짜 데이터가 담긴 셀(TD) 데이터만 정확하게 낚아챕니다.")
+    st.info("순번 <th> 태그에 속지 않고, 오직 안에 적힌 '진짜 글자'만을 분석하여 빈틈없이 데이터를 수확합니다.")
     
     test_url = st.text_input("타겟 URL (고정)", value="https://ebiz.khnp.co.kr/login.do", disabled=True)
     
@@ -647,26 +647,32 @@ elif menu == "🧪 스텔스 테스트 랩 (한수원)":
                 else:
                     st.warning("⚠️ 지름길 버튼(+)과 메뉴를 모두 찾지 못했습니다.")
                 
-                # 🌟 추출 함수 완벽 진화: TH 태그(머리글)를 가진 줄은 데이터 수집에서 무조건 제외합니다!
+                # 🌟 추출 함수 최종 진화: TH 태그 무시하고 오직 내부 텍스트만으로 유효성 검사!
                 def extract_table_data(d):
                     soup = BeautifulSoup(d.page_source, 'html.parser')
                     rows = soup.find_all("tr")
                     valid_rows = []
                     
+                    # 제목(머리글) 및 에러 메시지에 포함된 단어들
+                    ignore_words = ['인증서', '비밀번호', '조회된 데이터가 없습니다', '표시할 데이터가 없습니다', 
+                                    '구매운영단위', '결과상태', '입찰방식', '공고일자']
+                    
                     for r in rows:
-                        # 만약 이 줄(tr) 안에 제목을 뜻하는 <th> 태그가 포함되어 있다면 무조건 머리글(헤더)이므로 건너뜁니다!
-                        if r.find('th'):
-                            continue
+                        text = r.get_text(separator=' | ', strip=True)
+                        # 조건: 길이가 20자 이상이고, 쪼개진 칸(|)이 3개 이상이며, 제목 단어가 전혀 없는 경우
+                        if len(text) > 20 and text.count('|') >= 3 and not any(word in text for word in ignore_words):
+                            valid_rows.append(text)
                             
-                        cells = r.find_all('td')
-                        if len(cells) >= 5: # 데이터 셀(td)이 5개 이상 있는 진짜 바디 줄만 취급
-                            text = r.get_text(separator=' | ', strip=True)
-                            ignore_words = ['인증서', '비밀번호', '조회된 데이터가 없습니다', '표시할 데이터가 없습니다', '구매운영단위', '결과상태', '공고일자']
-                            if not any(word in text for word in ignore_words) and len(text) > 15:
-                                valid_rows.append(text)
-                                
-                    if len(valid_rows) > 0:
-                        return [f"[{idx+1}] " + txt for idx, txt in enumerate(valid_rows[:15])]
+                    # 중복 제거
+                    seen = set()
+                    unique_rows = []
+                    for x in valid_rows:
+                        if x not in seen:
+                            unique_rows.append(x)
+                            seen.add(x)
+                            
+                    if len(unique_rows) > 0:
+                        return [f"[{idx+1}] " + txt for idx, txt in enumerate(unique_rows[:15])]
                     return None
 
                 st.write("⏳ 로딩 스피너(동그라미) 대기 및 진짜 데이터 추출 진행 중 (최대 20초)...")
