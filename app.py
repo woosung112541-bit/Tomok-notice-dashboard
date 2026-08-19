@@ -87,9 +87,6 @@ def get_recent_log():
     except:
         return "기록 없음", "-"
 
-# ==========================================
-# ⚡ 데이터 통신 및 상태 업데이트 함수
-# ==========================================
 if "GOOGLE_CREDENTIALS" in st.secrets:
     with open("google_key.json", "w", encoding="utf-8") as f:
         f.write(st.secrets["GOOGLE_CREDENTIALS"])
@@ -137,9 +134,6 @@ def update_notice_status(notice_keys_to_mark, status_value):
     except Exception as e:
         return False
 
-# ==========================================
-# 🚀 엑셀 기반 타겟 발주처 목록 추출 헬퍼 함수
-# ==========================================
 @st.cache_data
 def get_target_org_list():
     try:
@@ -152,9 +146,6 @@ def get_target_org_list():
     except:
         return ["한국시설안전협회", "조달청 통합명부", "아이건설넷"]
 
-# ==========================================
-# 🎨 테이블 렌더링 헬퍼 함수
-# ==========================================
 def render_notice_table(df, key_prefix):
     if df.empty:
         st.info("해당되는 공고가 없습니다.")
@@ -211,7 +202,10 @@ def render_notice_table(df, key_prefix):
 # 사이드바 메뉴 설정
 # ==========================================
 st.sidebar.title("📌 메뉴 선택")
-menu = st.sidebar.radio("이동할 메뉴를 선택하세요:", ["공고 자동수집", "공고 통계 및 분석", "🎯 타겟 공고 (내 업무)", "사이트 검토 필요(오류/개편)", "📝 게시판 / 메모장"])
+menu = st.sidebar.radio(
+    "이동할 메뉴를 선택하세요:",
+    ["공고 자동수집", "공고 통계 및 분석", "🎯 타겟 공고 (내 업무)", "사이트 검토 필요(오류/개편)", "🔗 발주처 URL 관리", "📝 게시판 / 메모장"]
+)
 st.sidebar.divider()
 
 st.sidebar.subheader("🔗 주요 사이트 바로가기")
@@ -226,9 +220,51 @@ last_engine, last_time = get_recent_log()
 st.sidebar.info(f"**엔진:** {last_engine}\n\n**시간:** {last_time}")
 
 # ==========================================
+# 0. 🔗 발주처 URL 관리 (새로운 기능!)
+# ==========================================
+if menu == "🔗 발주처 URL 관리":
+    st.title("🔗 발주처 전용 URL (게시판 직행) 관리")
+    st.info("💡 **로봇이 엑셀의 홈페이지 주소에서 고시공고 게시판을 찾지 못하는 경우, 이곳에 정확한 게시판 직통 URL을 직접 입력해두세요!**\n\n여기에 등록된 URL은 엑셀 주소보다 무조건 우선 적용되어 탐색 실패를 막아줍니다.")
+    
+    # URL Overrides 시트 로드
+    df_url = get_google_sheet("url_overrides")
+    if df_url.empty:
+        # 기본 데이터가 없으면 초기 데이터 생성
+        df_url = pd.DataFrame([
+            {"발주기관명": "대전교통공사", "정확한_게시판_URL": "https://www.djtc.kr/kor/board.do?menuIdx=361", "비고": "기본값"},
+            {"발주기관명": "서산시", "정확한_게시판_URL": "https://www.seosan.go.kr/www/contents.do?key=1258", "비고": "기본값"},
+            {"발주기관명": "대전광역시 서구", "정확한_게시판_URL": "https://www.seogu.go.kr/prog/saeolGosi/GOSI/kor/sub04_02_01/list.do", "비고": "기본값"},
+            {"발주기관명": "논산시", "정확한_게시판_URL": "https://www.nonsan.go.kr/kor/html/sub03/03010201.html", "비고": "기본값"}
+        ])
+    
+    st.write("▼ 더블클릭하여 내용을 수정하거나, 맨 아래 빈칸을 눌러 새 기관을 추가하세요. 행을 선택하고 Delete 키를 누르면 삭제됩니다.")
+    edited_url_df = st.data_editor(df_url, num_rows="dynamic", use_container_width=True)
+    
+    if st.button("💾 변경사항 저장하여 로봇에 적용하기", type="primary"):
+        with st.spinner("구글 시트에 저장 중..."):
+            try:
+                gc = gspread.service_account(filename="google_key.json")
+                doc = gc.open("맞춤공고_DB")
+                try: ws_urls = doc.worksheet("url_overrides")
+                except: ws_urls = doc.add_worksheet("url_overrides", 100, 3)
+                
+                # 빈 값이나 NaN 제거
+                edited_url_df = edited_url_df.fillna("")
+                data_to_save = [edited_url_df.columns.tolist()] + edited_url_df.values.tolist()
+                
+                ws_urls.clear()
+                ws_urls.update(values=data_to_save, range_name="A1")
+                get_google_sheet.clear()
+                st.success("✅ 저장이 완료되었습니다! 이제부터 수집 시 해당 기관은 이 직통 주소로만 탐색합니다.")
+                time.sleep(1.5)
+                st.rerun()
+            except Exception as e:
+                st.error(f"저장 중 오류 발생: {e}")
+
+# ==========================================
 # 1. 공고 자동수집 메뉴
 # ==========================================
-if menu == "공고 자동수집":
+elif menu == "공고 자동수집":
     st.title("🚀 공고 자동 수집 & 실시간 검색")
     
     with st.container(border=True):
@@ -237,12 +273,10 @@ if menu == "공고 자동수집":
         with col1: 
             collect_days = st.number_input("수집 기간 (0입력 시, 당일만 수집)", min_value=0, max_value=365, value=0, step=1)
         with col2: 
-            # 🚀 키워드 3개 축소 반영
             collect_keywords = st.text_input("🔑 수집 키워드 (쉼표 구분)", value="모집, 안전, 공고")
         
         st.divider()
         st.subheader("🎯 타겟 발주처 설정")
-        # 🚀 전수조사 및 특정 발주처 선택 토글 추가
         scan_mode = st.toggle("✅ 전수조사 (모든 등록 기관 스캔)", value=True)
         
         selected_orgs_str = "ALL"
@@ -255,7 +289,6 @@ if menu == "공고 자동수집":
                 selected_orgs_str = ",".join(selected_orgs)
         
         st.divider()
-        # 극한 탐색 엔진 UI 포함 원상 복구
         engine_choice = st.radio("⚙️ 수집 엔진 선택", [
             "빠른 탐색(열람가능 사이트)", "정밀 탐색(셀레니움 병행)", "극한 탐색(최대 60초 대기/셀레니움)", "🌟 주요 4대 중앙 사이트 전용 탐색"
         ], horizontal=True)
@@ -276,7 +309,6 @@ if menu == "공고 자동수집":
                         manage_sheet_lock("lock_and_log", engine_name=engine_choice)
                         get_recent_log.clear() 
                         
-                        # 🚀 Python 스크립트에 파라미터 3개 전달 (기간, 키워드, 특정기관목록)
                         process = subprocess.Popen(
                             [sys.executable, "-u", target_script, str(collect_days), collect_keywords, selected_orgs_str],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', bufsize=1
@@ -334,7 +366,7 @@ if menu == "공고 자동수집":
     else:
         st.info("아직 구글 시트에 수집된 데이터가 없습니다.")
 
-# (이하 통계, 타겟공고, 게시판 메뉴 생략 - 기존과 100% 동일하게 작동합니다)
+# (기타 메뉴 유지)
 elif menu == "공고 통계 및 분석":
     st.title("📊 공고 통계 및 분석 대시보드")
     st.write("통계 기능 정상 작동") # 생략됨
