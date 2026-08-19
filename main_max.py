@@ -1,34 +1,6 @@
 """
-main_max.py — 공고 탐색 딥 스캔 엔진 (안정성/정확도 강화판)
-
-원본 대비 변경 사항 요약
-------------------------------------------------------------
-[보안] IGUNSUL_ID / IGUNSUL_PW / G2B_API_KEY / 구글 서비스계정 키를
-       코드에 하드코딩하지 않고 환경변수 또는 Streamlit secrets에서 로드.
-       (원본은 깃허브에 그대로 올라가 있었으므로, 이 값들은 지금 즉시
-        새로 발급/변경하는 것을 강력히 권장합니다.)
-[치명] 모듈을 import만 해도 sys.argv를 읽어버리는 코드 제거,
-       구글시트 연결 실패 시 sys.exit(1)로 "이 스크립트를 import한
-       프로세스 전체(Streamlit 앱 자체)"가 죽어버리던 문제 제거.
-       → run() 함수로 캡슐화, 실패해도 결과 dict를 반환.
-[치명] 사용하지 않는 olefile / pypdf import 제거.
-       requirements.txt에 없으면 import 시점에 바로 죽는 원인이었을 수 있음.
-[정확도] 거의 모든 except: pass 를 제거하고 로깅 + RUN_LOG 로 수집.
-        → 지금까지는 실패해도 "조용히" 넘어가서 원인 파악이 불가능했음.
-[정확도] EUC-KR 등 비-UTF8 사이트에서 한글이 깨져 키워드 매칭이
-        실패하던 인코딩 문제 수정 (apparent_encoding 자동 판별).
-[정확도] 날짜 인식 로직 수정 — '마감일'을 '등록일'로 오인해서
-        최근 공고가 필터링되던 버그 수정 (라벨 기반 판별 추가).
-[정확도] 중복판정 키에 등록일을 포함 — 매년 반복되는 동일 제목의
-        정기 용역 공고가 "이미 수집됨"으로 오판되어 누락되던 문제 수정.
-[안정성] 네트워크 요청에 재시도(retry) 추가.
-[안정성] Selenium 로그인 시 value만 세팅하던 것을 input/change 이벤트까지
-        발생시키도록 수정 (프레임워크 기반 로그인 폼 대응).
-[안정성] 크롬드라이버 경로를 여러 후보로 시도, 실패해도 해당 사이트만
-        건너뛰고 전체 파이프라인은 계속 진행.
-------------------------------------------------------------
+main_max.py — 공고 탐색 딥 스캔 엔진 (안정성/정확도 강화판 + 타겟기관 필터링)
 """
-
 import os
 import sys
 import re
@@ -60,25 +32,15 @@ except ImportError:
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 warnings.filterwarnings("ignore", module='bs4')
 
-# ==========================================================
-# 로깅 — 원본의 except: pass 를 대체.
-# 실행 후 어떤 사이트에서 무슨 이유로 실패했는지 눈으로 볼 수 있게 함.
-# ==========================================================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("gonggo_scanner")
 RUN_LOG = []
-
 
 def log_error(context, err):
     msg = f"[{context}] {type(err).__name__}: {err}"
     logger.warning(msg)
     RUN_LOG.append(msg)
 
-
-# ==========================================================
-# 자격증명 로딩 — 절대 하드코딩하지 않음
-# 환경변수 우선, 없으면 Streamlit secrets 시도
-# ==========================================================
 def _get_secret(key, default=""):
     val = os.environ.get(key)
     if val:
@@ -90,21 +52,18 @@ def _get_secret(key, default=""):
             pass
     return default
 
-
 IGUNSUL_ID = _get_secret("IGUNSUL_ID")
 IGUNSUL_PW = _get_secret("IGUNSUL_PW")
 G2B_API_KEY = _get_secret("G2B_API_KEY")
 
 KST = timezone(timedelta(hours=9))
 
-
 def get_now_kst():
     return datetime.now(KST).replace(tzinfo=None)
 
-
-# 모듈 레벨 기본값(하위 호환 / CLI 단독 실행용). 실제 값은 run() 호출 시마다 새로 계산됨.
 DAYS_AGO_DEFAULT = 15
-TARGET_KEYWORDS_DEFAULT = ["안전", "모집", "지정", "공고", "용역"]
+# 🚀 키워드 3개 축소
+TARGET_KEYWORDS_DEFAULT = ["모집", "안전", "공고"]
 DAYS_AGO = DAYS_AGO_DEFAULT
 TARGET_KEYWORDS = TARGET_KEYWORDS_DEFAULT
 target_date_limit = get_now_kst() - timedelta(days=DAYS_AGO_DEFAULT)
@@ -121,7 +80,6 @@ MINUS_KWS = ["건축분야", "신축", "번지", "증축", "수의", "건립"]
 REGION_KWS = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주']
 REGION_HINT_KWS = ['지역제한', '소재지', '영업소', '한정', '관내', '소재한', '위치한']
 
-# 날짜 인식 시 '마감일'을 '등록일'로 오인하지 않도록 하는 라벨
 DEADLINE_LABELS = ["마감", "접수마감", "제출마감", "입찰마감", "개찰"]
 POST_LABELS = ["등록일", "게시일", "작성일", "공고일"]
 
@@ -145,10 +103,6 @@ DEFAULT_HEADERS = {
                   '(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
 }
 
-
-# ==========================================================
-# 구글 시트 인증 — Streamlit secrets > 환경변수 JSON > 로컬 파일 순
-# ==========================================================
 def get_gspread_client():
     if st is not None:
         try:
@@ -170,15 +124,9 @@ def get_gspread_client():
         return gspread.service_account(filename=key_path)
 
     raise RuntimeError(
-        "구글 서비스 계정 인증 정보를 찾을 수 없습니다. "
-        "Streamlit secrets의 [gcp_service_account], 환경변수 GOOGLE_SERVICE_ACCOUNT_JSON, "
-        "또는 로컬 google_key.json 파일 중 하나를 준비하세요."
+        "구글 서비스 계정 인증 정보를 찾을 수 없습니다."
     )
 
-
-# ==========================================================
-# 공통 네트워크 유틸 — 재시도 + 인코딩 자동 보정
-# ==========================================================
 def safe_get(url, timeout=(10, 20), retries=2, headers=None):
     last_err = None
     for attempt in range(retries + 1):
@@ -193,13 +141,11 @@ def safe_get(url, timeout=(10, 20), retries=2, headers=None):
     log_error(f"safe_get:{url}", last_err)
     return None
 
-
 def get_domain(url):
     try:
         return urllib.parse.urlparse(str(url)).netloc
     except Exception:
         return ""
-
 
 def discover_additional_boards(base_url, domain):
     discovered_urls = set()
@@ -225,7 +171,6 @@ def discover_additional_boards(base_url, domain):
         reverse=True
     )
     return sorted_urls[:3]
-
 
 def deep_scan_notice(url):
     found_specials = set()
@@ -257,7 +202,6 @@ def deep_scan_notice(url):
 
     return "🔥 " + ", ".join(list(found_specials)) if found_specials else "-"
 
-
 def bulldozer_scan_html(html_source, base_url, org_name):
     _now = get_now_kst()
     soup = BeautifulSoup(html_source, 'html.parser')
@@ -284,7 +228,7 @@ def bulldozer_scan_html(html_source, base_url, org_name):
             processed_rows.add(row_id)
 
             row_text = row.get_text(separator=' ', strip=True)
-            candidates = []  # (date, is_deadline, is_post_labeled)
+            candidates = [] 
 
             matches = list(re.finditer(r'(20\d{2}|\d{2})[-./년\s]+(\d{1,2})[-./월\s]+(\d{1,2})', row_text))
             for match in matches:
@@ -321,13 +265,11 @@ def bulldozer_scan_html(html_source, base_url, org_name):
 
             valid = [c for c in candidates if c[0] <= _now + timedelta(days=1)]
             post_date = None
-            # 1순위: '등록일/게시일' 등으로 명시된 날짜
+            
             labeled = [c[0] for c in valid if c[2] and not c[1]]
             if labeled:
                 post_date = min(labeled)
             else:
-                # 2순위: '마감'류 라벨이 없는 날짜 중 가장 이른 날짜
-                # (원본은 max()를 써서 '마감일'을 등록일로 오인하는 경우가 있었음)
                 non_deadline = [c[0] for c in valid if not c[1]]
                 if non_deadline:
                     post_date = min(non_deadline)
@@ -367,7 +309,6 @@ def bulldozer_scan_html(html_source, base_url, org_name):
 
     return results
 
-
 def smart_scrape_board(url, domain, org_name):
     res = safe_get(url, timeout=(15, 30))
     if res is None:
@@ -379,13 +320,11 @@ def smart_scrape_board(url, domain, org_name):
         log_error(f"smart_scrape_board:{org_name}:{url}", e)
         return [], 0
 
-
 def _build_driver(service, options):
     driver = webdriver.Chrome(service=service, options=options)
     driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": DEFAULT_HEADERS['User-Agent']})
     driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
     return driver
-
 
 def get_chrome_driver():
     chrome_options = Options()
@@ -418,11 +357,7 @@ def get_chrome_driver():
         last_err = e
 
     log_error("get_chrome_driver", last_err)
-    raise RuntimeError(
-        "Chrome/Chromedriver를 찾을 수 없습니다. Streamlit Community Cloud라면 저장소 루트에 "
-        "packages.txt를 만들고 'chromium'과 'chromium-driver' 두 줄을 추가한 뒤 재배포하세요."
-    ) from last_err
-
+    raise RuntimeError("Chrome/Chromedriver를 찾을 수 없습니다.") from last_err
 
 def smart_scrape_board_with_selenium(url, domain, org_name):
     results = []
@@ -457,7 +392,7 @@ def smart_scrape_board_with_selenium(url, domain, org_name):
                 except Exception as e:
                     log_error("igunsul-login", e)
             else:
-                log_error("igunsul-login", RuntimeError("IGUNSUL_ID / IGUNSUL_PW 미설정 (환경변수 또는 st.secrets 확인)"))
+                log_error("igunsul-login", RuntimeError("IGUNSUL_ID / IGUNSUL_PW 미설정"))
 
         driver.get(url)
         time.sleep(4)
@@ -521,12 +456,9 @@ def smart_scrape_board_with_selenium(url, domain, org_name):
         log_error(f"smart_scrape_board_with_selenium:{org_name}", e)
     finally:
         if driver:
-            try:
-                driver.quit()
-            except Exception:
-                pass
+            try: driver.quit()
+            except Exception: pass
     return results
-
 
 def fetch_g2b_api(api_key, days_ago, keywords):
     if not api_key:
@@ -582,7 +514,6 @@ def fetch_g2b_api(api_key, days_ago, keywords):
             log_error(f"fetch_g2b_api:{endpoint}", e)
     return results
 
-
 def load_target_sites():
     try:
         df_input = pd.read_excel(INPUT_EXCEL, sheet_name=0)
@@ -613,7 +544,6 @@ def load_target_sites():
     target_sites.extend(EXTRA_SITES)
     unique_sites = {site['url']: site for site in target_sites}.values()
     return list(unique_sites)
-
 
 def process_site(site):
     base_url, org_name = site['url'], site['org_name']
@@ -651,13 +581,8 @@ def process_site(site):
         'found': len(site_notices) > 0, 'status': health_status
     }
 
-
-def run(days_ago=None, keywords=None, max_workers=2):
-    """
-    전체 파이프라인 실행. 예외가 나도 sys.exit()를 호출하지 않고
-    항상 결과 dict를 반환한다 — Streamlit 프로세스 안에서 직접 import해서
-    호출해도 앱 전체가 죽지 않는다.
-    """
+# 🚀 런 함수에 target_orgs 파라미터 추가하여 발주처 필터링 연동
+def run(days_ago=None, keywords=None, target_orgs="ALL", max_workers=2):
     global RUN_LOG, TARGET_KEYWORDS, target_date_limit, current_time
     RUN_LOG = []
 
@@ -700,6 +625,17 @@ def run(days_ago=None, keywords=None, max_workers=2):
         return result
 
     all_sites = load_target_sites()
+    
+    # 🚀 타겟 기관 필터링 적용 (전수조사가 아닌 경우)
+    if target_orgs != "ALL":
+        allowed_orgs = [o.strip() for o in target_orgs.split(',') if o.strip()]
+        all_sites = [site for site in all_sites if site['org_name'] in allowed_orgs]
+        if not all_sites:
+            logger.warning("선택된 기관에 해당하는 사이트 URL이 명부에 없습니다.")
+            result["success"] = True
+            result["errors"] = ["선택된 기관에 해당하는 사이트 URL이 명부에 없습니다."]
+            return result
+
     all_notices, empty_sites = [], []
     logger.info(f"[시작] 딥 스캔 엔진 가동 — 대상 {len(all_sites)}곳, 최근 {days_ago}일, 키워드 {kw_list}")
 
@@ -727,7 +663,6 @@ def run(days_ago=None, keywords=None, max_workers=2):
 
     new_rows = []
     for item in all_notices:
-        # 등록일을 키에 포함 — 매년 반복되는 동일 제목 정기공고 누락 방지
         notice_key = f"{item['출처']}|||{item['공고제목']}|||{item.get('등록일', '')}"
         if notice_key not in history_keys:
             new_rows.append([
@@ -759,7 +694,6 @@ def run(days_ago=None, keywords=None, max_workers=2):
     })
     return result
 
-
 if __name__ == "__main__":
     if len(sys.argv) >= 3:
         _days = int(sys.argv[1])
@@ -768,7 +702,13 @@ if __name__ == "__main__":
         _days = DAYS_AGO_DEFAULT
         _kw = ",".join(TARGET_KEYWORDS_DEFAULT)
 
-    outcome = run(_days, _kw)
+    # 🚀 파라미터 3: 특정 발주처 목록 (ALL 이면 전수조사)
+    if len(sys.argv) >= 4:
+        _orgs = sys.argv[3]
+    else:
+        _orgs = "ALL"
+
+    outcome = run(_days, _kw, _orgs)
 
     if not outcome.get("success"):
         print(f"[실패] 구글 시트 초기화 오류: {outcome.get('fatal')}")
