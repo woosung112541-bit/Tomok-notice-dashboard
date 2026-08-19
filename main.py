@@ -36,12 +36,19 @@ G2B_API_KEY = "9f7b495399ad64ec35b86f54a0a933fdf368b264bed9bcbf4e9b11556b6c9ff9"
 KST = timezone(timedelta(hours=9))
 now_kst = datetime.now(KST).replace(tzinfo=None)
 
+# 🚀 파라미터 1,2: 일수 및 키워드 (기본: 모집, 안전, 공고)
 if len(sys.argv) >= 3:
     DAYS_AGO = int(sys.argv[1])
-    TARGET_KEYWORDS = [word.strip() for word in sys.argv[2].split(',')]
+    TARGET_KEYWORDS = [word.strip() for word in sys.argv[2].split(',') if word.strip()]
 else:
     DAYS_AGO = 15
-    TARGET_KEYWORDS = ["안전", "모집", "지정", "공고", "용역"]
+    TARGET_KEYWORDS = ["모집", "안전", "공고"]
+
+# 🚀 파라미터 3: 특정 발주처 목록 (ALL 이면 전수조사)
+if len(sys.argv) >= 4:
+    TARGET_ORGS_ARG = sys.argv[3]
+else:
+    TARGET_ORGS_ARG = "ALL"
 
 if DAYS_AGO == 0: target_date_limit = now_kst.replace(hour=0, minute=0, second=0, microsecond=0)
 else: target_date_limit = now_kst - timedelta(days=DAYS_AGO)
@@ -70,8 +77,6 @@ try:
     ws_notices = doc.worksheet("notices")
     ws_collected = doc.worksheet("collected_orgs")
     ws_empty = doc.worksheet("empty_orgs")
-    if not ws_notices.get_all_values(): ws_notices.append_row(["출처", "등록일", "공고제목", "상세링크", "notice_key", "created_at", "특이사항", "검토유무"])
-    if not ws_collected.get_all_values(): ws_collected.append_row(["org_name"])
     existing_notices = ws_notices.get_all_records()
     history_keys = {str(row.get('notice_key', '')) for row in existing_notices}
     existing_collected = ws_collected.get_all_records()
@@ -389,6 +394,14 @@ try:
 except:
     all_sites = EXTRA_SITES
 
+# 🚀 타겟 기관 필터링 적용 (전수조사가 아닌 경우)
+if TARGET_ORGS_ARG != "ALL":
+    allowed_orgs = [o.strip() for o in TARGET_ORGS_ARG.split(',')]
+    all_sites = [site for site in all_sites if site['org_name'] in allowed_orgs]
+    if not all_sites:
+        print("💡 선택된 기관에 해당하는 사이트 URL이 명부에 없습니다.")
+        sys.exit(0)
+
 def process_site(site):
     base_url, org_name = site['url'], site['org_name']
     domain = get_domain(base_url)
@@ -399,9 +412,9 @@ def process_site(site):
         if res.status_code == 404: health_status = "❌ 404 에러"
         elif res.status_code != 200: health_status = f"⚠️ 서버 에러 ({res.status_code})"
     except: health_status = "🔌 연결 실패"
+    
     urls_to_scrape = [base_url] + discover_additional_boards(base_url, domain)
     site_notices = []
-    
     js_heavy_domains = ["igunsul.net", "pps.go.kr", "khnp.co.kr"]
     needs_selenium = any(d in domain for d in js_heavy_domains)
     
@@ -414,10 +427,11 @@ def process_site(site):
             if rows_count == 0:
                 data = smart_scrape_board_with_selenium(u, domain, org_name)
             site_notices.extend(data)
+            
     return {'org_name': org_name, 'base_url': base_url, 'notices': site_notices, 'found': len(site_notices) > 0, 'status': health_status}
 
 all_notices, empty_sites = [], []
-print("[시작] 정밀 탐색 가동 (Requests/Selenium 병행)")
+print(f"[시작] 정밀 탐색 가동 - 타겟: {'전수조사' if TARGET_ORGS_ARG == 'ALL' else str(len(all_sites))+'개 기관'}")
 
 with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
     future_to_site = {executor.submit(process_site, site): site for site in all_sites}
@@ -444,13 +458,5 @@ for item in all_notices:
         history_keys.add(notice_key)
 
 if new_rows: ws_notices.append_rows(new_rows)
-
-new_orgs = [[org] for org in collected_orgs if org not in {str(row.get('org_name', '')) for row in existing_collected}]
-if new_orgs: ws_collected.append_rows(new_orgs)
-
-ws_empty.clear()
-ws_empty.append_row(['출처기관', '게시판_URL', '분류'])
-empty_rows = [[e['출처기관'], e['게시판_URL'], e['분류']] for e in empty_sites if e['출처기관'] not in collected_orgs]
-if empty_rows: ws_empty.append_rows(empty_rows)
 
 print("\n[종료] 정밀 탐색 수집 완료!")
