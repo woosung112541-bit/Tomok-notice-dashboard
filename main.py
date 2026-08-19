@@ -36,7 +36,7 @@ G2B_API_KEY = "9f7b495399ad64ec35b86f54a0a933fdf368b264bed9bcbf4e9b11556b6c9ff9"
 KST = timezone(timedelta(hours=9))
 now_kst = datetime.now(KST).replace(tzinfo=None)
 
-# 🚀 파라미터 1,2: 일수 및 키워드 (기본: 모집, 안전, 공고)
+# 🚀 파라미터 파싱
 if len(sys.argv) >= 3:
     DAYS_AGO = int(sys.argv[1])
     TARGET_KEYWORDS = [word.strip() for word in sys.argv[2].split(',') if word.strip()]
@@ -44,7 +44,7 @@ else:
     DAYS_AGO = 15
     TARGET_KEYWORDS = ["모집", "안전", "공고"]
 
-# 🚀 파라미터 3: 특정 발주처 목록 (ALL 이면 전수조사)
+# 🚀 특정 기관 필터링 파라미터 파싱
 if len(sys.argv) >= 4:
     TARGET_ORGS_ARG = sys.argv[3]
 else:
@@ -394,7 +394,7 @@ try:
 except:
     all_sites = EXTRA_SITES
 
-# 🚀 타겟 기관 필터링 적용 (전수조사가 아닌 경우)
+# 🚀 특정 기관 필터링 적용 (전수조사가 아닌 경우)
 if TARGET_ORGS_ARG != "ALL":
     allowed_orgs = [o.strip() for o in TARGET_ORGS_ARG.split(',')]
     all_sites = [site for site in all_sites if site['org_name'] in allowed_orgs]
@@ -415,6 +415,7 @@ def process_site(site):
     
     urls_to_scrape = [base_url] + discover_additional_boards(base_url, domain)
     site_notices = []
+    
     js_heavy_domains = ["igunsul.net", "pps.go.kr", "khnp.co.kr"]
     needs_selenium = any(d in domain for d in js_heavy_domains)
     
