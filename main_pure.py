@@ -23,12 +23,19 @@ G2B_API_KEY = "9f7b495399ad64ec35b86f54a0a933fdf368b264bed9bcbf4e9b11556b6c9ff9"
 KST = timezone(timedelta(hours=9))
 now_kst = datetime.now(KST).replace(tzinfo=None)
 
+# 🚀 파라미터 1,2: 일수 및 키워드 (기본: 모집, 안전, 공고)
 if len(sys.argv) >= 3:
     DAYS_AGO = int(sys.argv[1])
-    TARGET_KEYWORDS = [word.strip() for word in sys.argv[2].split(',')]
+    TARGET_KEYWORDS = [word.strip() for word in sys.argv[2].split(',') if word.strip()]
 else:
     DAYS_AGO = 15
-    TARGET_KEYWORDS = ["안전", "모집", "지정", "공고", "용역"]
+    TARGET_KEYWORDS = ["모집", "안전", "공고"]
+
+# 🚀 파라미터 3: 특정 발주처 목록 (ALL 이면 전수조사)
+if len(sys.argv) >= 4:
+    TARGET_ORGS_ARG = sys.argv[3]
+else:
+    TARGET_ORGS_ARG = "ALL"
 
 if DAYS_AGO == 0: target_date_limit = now_kst.replace(hour=0, minute=0, second=0, microsecond=0)
 else: target_date_limit = now_kst - timedelta(days=DAYS_AGO)
@@ -55,8 +62,6 @@ try:
     ws_notices = doc.worksheet("notices")
     ws_collected = doc.worksheet("collected_orgs")
     ws_empty = doc.worksheet("empty_orgs")
-    if not ws_notices.get_all_values(): ws_notices.append_row(["출처", "등록일", "공고제목", "상세링크", "notice_key", "created_at", "특이사항", "검토유무"])
-    if not ws_collected.get_all_values(): ws_collected.append_row(["org_name"])
     existing_notices = ws_notices.get_all_records()
     history_keys = {str(row.get('notice_key', '')) for row in existing_notices}
     existing_collected = ws_collected.get_all_records()
@@ -170,50 +175,6 @@ def pure_scrape_board(url, domain, org_name):
     except: pass
     return results
 
-def fetch_g2b_api(api_key, days_ago, keywords):
-    if not api_key: return []
-    g2b_now_kst = datetime.now(timezone(timedelta(hours=9)))
-    end_dt = g2b_now_kst.strftime("%Y%m%d2359")
-    start_dt = (g2b_now_kst - timedelta(days=days_ago)).strftime("%Y%m%d0000")
-    results = []
-    endpoints = ["getFcltyBidPblancListInfoServc", "getServcBidPblancListInfoServc", "getBidPblancListInfoServc"]
-    
-    for endpoint in endpoints:
-        url = f"http://apis.data.go.kr/1230000/BidPublicInfoService04/{endpoint}"
-        params = {"serviceKey": api_key, "numOfRows": "999", "pageNo": "1", "inqryDiv": "1", "inqryBgnDt": start_dt, "inqryEndDt": end_dt, "type": "json"}
-        try:
-            res = requests.get(url, params=params, timeout=30)
-            if res.status_code == 200:
-                items = res.json().get('response', {}).get('body', {}).get('items', [])
-                for item in items:
-                    title = item.get('bidNtceNm', '')
-                    if not keywords or any(kw in title for kw in keywords):
-                        region = item.get('prtcptPosblRgnNm', '')
-                        quelfc = item.get('bidQuelfcCdNm', '')
-                        link = item.get('bidNtceDtlUrl', '')
-                        
-                        special = []
-                        if region: special.append(f"지역제한({region})")
-                        if quelfc: special.append("자격제한(상세확인)")
-                        
-                        deep_special = deep_scan_notice(link) if link else "-"
-                        
-                        final_special = []
-                        if special: final_special.append("🔥 " + ", ".join(special))
-                        if deep_special != "-": final_special.append(deep_special)
-                        final_special_str = " / ".join(final_special) if final_special else "-"
-                        
-                        if not any(r['공고제목'] == title and r['출처'].startswith(item.get('dmdInsttNm', '조달청')) for r in results):
-                            results.append({
-                                '출처': f"{item.get('dmdInsttNm', '조달청')} (나라장터)", 
-                                '등록일': item.get('bidNtceDt', '')[:10].replace('-', '.'), 
-                                '공고제목': title, 
-                                '상세링크': link, 
-                                '특이사항': final_special_str
-                            })
-        except: pass
-    return results
-
 try:
     df_input = pd.read_excel(INPUT_EXCEL, sheet_name=0)
     target_sites = []
@@ -242,6 +203,14 @@ try:
 except:
     all_sites = EXTRA_SITES
 
+# 🚀 타겟 기관 필터링 적용 (전수조사가 아닌 경우)
+if TARGET_ORGS_ARG != "ALL":
+    allowed_orgs = [o.strip() for o in TARGET_ORGS_ARG.split(',')]
+    all_sites = [site for site in all_sites if site['org_name'] in allowed_orgs]
+    if not all_sites:
+        print("💡 선택된 기관에 해당하는 사이트 URL이 명부에 없습니다.")
+        sys.exit(0)
+
 def process_site(site):
     base_url, org_name = site['url'], site['org_name']
     domain = get_domain(base_url)
@@ -256,7 +225,6 @@ def process_site(site):
     urls_to_scrape = [base_url] + discover_additional_boards(base_url, domain)
     site_notices = []
     
-    # 순수 렌더링 방식이므로 셀레니움 필요 도메인은 제외 (정밀 탐색에서 처리)
     js_heavy_domains = ["igunsul.net", "pps.go.kr", "khnp.co.kr"]
     if not any(d in domain for d in js_heavy_domains):
         for u in urls_to_scrape:
@@ -266,7 +234,7 @@ def process_site(site):
     return {'org_name': org_name, 'base_url': base_url, 'notices': site_notices, 'found': len(site_notices) > 0, 'status': health_status}
 
 all_notices, empty_sites = [], []
-print("[시작] 빠른 탐색 가동 (Requests 전용)")
+print(f"[시작] 빠른 탐색 가동 - 타겟: {'전수조사' if TARGET_ORGS_ARG == 'ALL' else str(len(all_sites))+'개 기관'}")
 
 with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
     future_to_site = {executor.submit(process_site, site): site for site in all_sites}
@@ -281,9 +249,6 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
                 empty_sites.append({'출처기관': res['org_name'], '게시판_URL': res['base_url'], '분류': res['status']})
         except: pass
 
-g2b_notices = fetch_g2b_api(G2B_API_KEY, DAYS_AGO, TARGET_KEYWORDS)
-if g2b_notices: all_notices.extend(g2b_notices)
-
 print("\n📝 [저장 중] 구글 시트에 기록합니다...")
 new_rows = []
 for item in all_notices:
@@ -293,13 +258,5 @@ for item in all_notices:
         history_keys.add(notice_key)
 
 if new_rows: ws_notices.append_rows(new_rows)
-
-new_orgs = [[org] for org in collected_orgs if org not in {str(row.get('org_name', '')) for row in existing_collected}]
-if new_orgs: ws_collected.append_rows(new_orgs)
-
-ws_empty.clear()
-ws_empty.append_row(['출처기관', '게시판_URL', '분류'])
-empty_rows = [[e['출처기관'], e['게시판_URL'], e['분류']] for e in empty_sites if e['출처기관'] not in collected_orgs]
-if empty_rows: ws_empty.append_rows(empty_rows)
 
 print("\n[종료] 빠른 탐색 수집 완료!")
