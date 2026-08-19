@@ -44,7 +44,6 @@ else:
     DAYS_AGO = 15
     TARGET_KEYWORDS = ["모집", "안전", "공고"]
 
-# 🚀 특정 기관 필터링 파라미터 파싱
 if len(sys.argv) >= 4:
     TARGET_ORGS_ARG = sys.argv[3]
 else:
@@ -71,6 +70,8 @@ EXTRA_SITES = [
     {'url': 'https://www.igunsul.net/', 'org_name': '아이건설넷'}
 ]
 
+# 🚀 구글 시트 연결 및 URL_OVERRIDES 동적 로드
+URL_OVERRIDES = {}
 try:
     gc = gspread.service_account(filename="google_key.json")
     doc = gc.open("맞춤공고_DB")
@@ -81,6 +82,19 @@ try:
     history_keys = {str(row.get('notice_key', '')) for row in existing_notices}
     existing_collected = ws_collected.get_all_records()
     collected_orgs = {str(row.get('org_name', '')) for row in existing_collected if str(row.get('org_name', ''))}
+    
+    # URL Overrides 로드
+    try:
+        ws_urls = doc.worksheet("url_overrides")
+        url_records = ws_urls.get_all_records()
+        for r in url_records:
+            org = str(r.get("발주기관명", "")).strip()
+            url_val = str(r.get("정확한_게시판_URL", "")).strip()
+            if org and url_val.startswith("http"):
+                URL_OVERRIDES[org] = url_val
+    except Exception as e:
+        print(f"URL 오버라이드 시트 로드 실패: {e}")
+
 except: sys.exit(1)
 
 COMMON_ROW_SELECTORS = ["table.board_list tbody tr", "table.board-list tbody tr", "div.board_list tbody tr", ".list_tbl tbody tr", "tbody > tr", "ul.board_list > li", "div.list > ul > li"]
@@ -377,12 +391,7 @@ try:
             if url_j.startswith('http'): target_sites.append({'url': url_j, 'org_name': org_name})
             if url_k.startswith('http'): target_sites.append({'url': url_k, 'org_name': org_name})
     
-    URL_OVERRIDES = {
-        "대전교통공사": "https://www.djtc.kr/kor/board.do?menuIdx=361",
-        "서산시": "https://www.seosan.go.kr/www/contents.do?key=1258",
-        "대전광역시 서구": "https://www.seogu.go.kr/prog/saeolGosi/GOSI/kor/sub04_02_01/list.do",
-        "논산시": "https://www.nonsan.go.kr/kor/html/sub03/03010201.html"
-    }
+    # 🚀 구글 시트에서 불러온 커스텀 URL 적용!
     for site in target_sites:
         for k, v in URL_OVERRIDES.items():
             if k in site['org_name']:
