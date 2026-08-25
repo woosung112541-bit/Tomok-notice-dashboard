@@ -1,0 +1,10 @@
+streamlit
+pandas
+requests
+beautifulsoup4
+openpyxl
+gspread
+selenium
+webdriver-manager
+pypdf
+olefile
