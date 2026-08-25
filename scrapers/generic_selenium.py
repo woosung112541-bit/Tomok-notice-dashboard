@@ -49,7 +49,15 @@ def get_driver() -> webdriver.Chrome:
     return driver
 
 
-def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]) -> list[dict]:
+def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]) -> tuple[list[dict], int]:
+    """
+    반환: (수집된 공고 리스트, 발견된 행 개수)
+    generic_requests.scrape_board()와 동일하게 행 개수를 함께 반환한다.
+    (예전 버전은 이 값을 반환하지 않아서, engine.py가 'selenium으로 게시판은
+    정상적으로 찾았지만 이번엔 조건에 맞는 공고가 없었을 뿐인 경우'와
+    '애초에 게시판 구조 자체를 못 찾은 경우'를 구분하지 못하고 전자까지
+    "수동 확인 필요"로 잘못 분류하는 문제가 있었다.)
+    """
     results = []
     driver = None
     try:
@@ -62,7 +70,7 @@ def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]
         log_failure(org_name, url, "selenium_load", e)
         if driver:
             driver.quit()
-        return results
+        return results, 0
 
     for row in rows:
         try:
@@ -82,4 +90,4 @@ def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]
         })
 
     driver.quit()
-    return results
+    return results, len(rows)

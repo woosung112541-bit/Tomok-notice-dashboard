@@ -52,6 +52,8 @@ def scrape(url: str, org_name: str, target_date_limit, keywords: list[str]) -> l
 
         soup = BeautifulSoup(driver.page_source, "html.parser")
         rows = select_rows(soup)
+        if not rows:
+            log_failure(org_name, url, "parse_row", "게시판 행 자체를 찾지 못함 (로그인 실패 또는 셀렉터 불일치 가능성)")
 
         for row in rows:
             fields = extract_row_fields(row, url, target_date_limit)

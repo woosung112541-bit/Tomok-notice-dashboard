@@ -78,7 +78,10 @@ def process_site(site: dict, target_date_limit, keywords: list[str]) -> dict:
     if not any_rows_found:
         # requests로 행 자체를 못 찾음 -> JS 렌더링이 필요한 사이트일 가능성 -> selenium으로 승격
         for u in candidate_urls:
-            all_notices.extend(generic_selenium.scrape_board(u, org_name, target_date_limit, keywords))
+            notices, rows_count = generic_selenium.scrape_board(u, org_name, target_date_limit, keywords)
+            all_notices.extend(notices)
+            if rows_count > 0:
+                any_rows_found = True  # selenium은 게시판을 정상적으로 찾음 (조건에 맞는 공고가 없을 뿐일 수 있음)
 
     if not all_notices and not any_rows_found:
         reason = "requests·selenium 모두 게시판 행을 찾지 못함 (게시판 구조 확인 필요)"
