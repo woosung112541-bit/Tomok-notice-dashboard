@@ -105,7 +105,7 @@ def _extract_text_from_attachment(file_url: str, headers: dict) -> str:
 
 def deep_scan_notice(url: str) -> str:
     """상세 페이지 + 첨부파일까지 열어 PLUS/MINUS/지역제한 키워드를 태깅해서 문자열로 반환."""
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = config.REQUEST_HEADERS
     full_text = ""
     try:
         res = requests.get(url, headers=headers, verify=False, timeout=config.REQUEST_TIMEOUT)
@@ -137,12 +137,27 @@ def deep_scan_notice(url: str) -> str:
 
 
 def discover_additional_boards(base_url: str, domain: str) -> list[str]:
-    """메인/상위 페이지에서 '고시·공고·입찰' 등 게시판으로 보이는 링크를 추가로 찾는다."""
-    headers = {"User-Agent": "Mozilla/5.0"}
-    discovered = set()
+    """
+    메인/상위 페이지에서 추가 게시판 후보를 찾는다. 두 가지를 찾는다.
+
+    1) <iframe src="..."> — 대전 동구청처럼 '입찰공고' 메뉴 페이지 안에 실제
+       게시판이 다른 도메인(eminwon.xxx.go.kr 등)의 iframe으로 통째로 끼워진
+       경우가 매우 흔하다. 겉 페이지 HTML만 보면 표가 하나도 안 보이므로,
+       iframe의 src를 최우선 후보로 별도 수집한다. (도메인 제한을 걸지 않는다 —
+       실제 게시판이 다른 서브도메인에 있는 게 이 패턴의 핵심이기 때문)
+    2) '고시·공고·입찰' 등 게시판으로 보이는 <a href> 메뉴 링크 (기존 로직)
+    """
+    discovered_iframes = set()
+    discovered_menu_links = set()
     try:
-        res = requests.get(base_url, headers=headers, verify=False, timeout=15)
+        res = requests.get(base_url, headers=config.REQUEST_HEADERS, verify=False, timeout=15)
         soup = BeautifulSoup(res.text, "html.parser")
+
+        for iframe in soup.find_all("iframe", src=True):
+            src = iframe["src"].strip()
+            if src and "javascript:" not in src.lower():
+                discovered_iframes.add(urllib.parse.urljoin(base_url, src))
+
         for a_tag in soup.find_all("a", href=True):
             text = a_tag.get_text(strip=True).replace(" ", "")
             href = a_tag["href"]
@@ -151,11 +166,14 @@ def discover_additional_boards(base_url: str, domain: str) -> list[str]:
                     continue
                 full_url = urllib.parse.urljoin(base_url, href)
                 if domain in full_url:
-                    discovered.add(full_url)
+                    discovered_menu_links.add(full_url)
     except Exception:
         pass
-    ranked = sorted(discovered, key=lambda u: any(k in u.lower() for k in ("gosi", "noti", "bid")), reverse=True)
-    return ranked[:5]
+
+    ranked_menu = sorted(discovered_menu_links,
+                          key=lambda u: any(k in u.lower() for k in ("gosi", "noti", "bid")), reverse=True)
+    # iframe은 겉 페이지가 사실상 빈 껍데기라는 강한 신호이므로 최우선으로 앞에 배치
+    return list(discovered_iframes) + ranked_menu[:5]
 
 
 def select_rows(soup: BeautifulSoup):

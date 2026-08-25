@@ -238,8 +238,23 @@ elif menu == "🚨 수동 확인 필요":
     if df_manual.empty:
         st.success("현재 수동 확인이 필요한 발주처가 없습니다.")
     else:
-        st.dataframe(df_manual, use_container_width=True, hide_index=True,
-                     column_config={"URL": st.column_config.LinkColumn("URL")})
+        is_g2b_migrated = df_manual["사유"].astype(str).str.contains("나라장터로 별도 수집", na=False)
+        df_real = df_manual[~is_g2b_migrated]
+        df_g2b = df_manual[is_g2b_migrated]
+
+        st.markdown(f"#### 🔴 진짜 확인이 필요한 발주처 ({len(df_real)}곳)")
+        if df_real.empty:
+            st.success("없습니다.")
+        else:
+            st.dataframe(df_real, use_container_width=True, hide_index=True,
+                         column_config={"URL": st.column_config.LinkColumn("URL")})
+
+        if not df_g2b.empty:
+            st.markdown(f"#### ⚪ 조달청 이관 기관 - 참고용 ({len(df_g2b)}곳)")
+            st.caption("명부에 '조달청 이관' 표시가 된 기관들입니다. 나라장터 API로 별도 수집되고 있어 "
+                       "자체 게시판에 공고가 없는 게 정상일 가능성이 높습니다.")
+            st.dataframe(df_g2b, use_container_width=True, hide_index=True,
+                         column_config={"URL": st.column_config.LinkColumn("URL")})
 
     st.divider()
     st.subheader("🪵 최근 실행 로그 (실패/경고)")

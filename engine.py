@@ -64,27 +64,39 @@ def process_site(site: dict, target_date_limit, keywords: list[str]) -> dict:
         return {"org_name": org_name, "base_url": base_url, "notices": notices,
                 "found": True, "manual_required": False, "manual_reason": ""}
 
-    # ── generic: requests 먼저, 추가 게시판 후보도 함께 시도 ──────────────────
+    # ── generic: requests 먼저, 추가 게시판 후보(iframe/메뉴링크)도 함께 시도 ────
     candidate_urls = [base_url] + discover_additional_boards(base_url, domain)
     all_notices = []
     any_rows_found = False
+    any_network_error = False
 
     for u in candidate_urls:
-        notices, rows_count = generic_requests.scrape_board(u, org_name, target_date_limit, keywords)
+        notices, rows_count, network_error = generic_requests.scrape_board(u, org_name, target_date_limit, keywords)
         all_notices.extend(notices)
         if rows_count > 0:
             any_rows_found = True
+        if network_error:
+            any_network_error = True
 
     if not any_rows_found:
         # requests로 행 자체를 못 찾음 -> JS 렌더링이 필요한 사이트일 가능성 -> selenium으로 승격
         for u in candidate_urls:
-            notices, rows_count = generic_selenium.scrape_board(u, org_name, target_date_limit, keywords)
+            notices, rows_count, network_error = generic_selenium.scrape_board(u, org_name, target_date_limit, keywords)
             all_notices.extend(notices)
             if rows_count > 0:
                 any_rows_found = True  # selenium은 게시판을 정상적으로 찾음 (조건에 맞는 공고가 없을 뿐일 수 있음)
+            if network_error:
+                any_network_error = True
 
     if not all_notices and not any_rows_found:
-        reason = "requests·selenium 모두 게시판 행을 찾지 못함 (게시판 구조 확인 필요)"
+        if any_network_error:
+            reason = ("서버 접속 자체가 시간 초과됨 - 이 사이트가 현재 실행 위치(클라우드 IP)의 "
+                       "접속을 막고 있을 가능성이 높음 (셀렉터 문제가 아님, 국내 IP 경유가 필요할 수 있음)")
+        elif config.G2B_MIGRATION_HINT in org_name:
+            reason = ("이 발주처는 명부에 '조달청 이관' 표시가 있어 자체 게시판에 공고가 없을 수 있음 "
+                       "(나라장터 API로 별도 수집되고 있으니 실제 문제가 아닐 가능성이 높음)")
+        else:
+            reason = "requests·selenium 모두 게시판 행을 찾지 못함 (게시판 구조 확인 필요)"
         log_manual_required(org_name, base_url, reason)
         return {"org_name": org_name, "base_url": base_url, "notices": [],
                 "found": False, "manual_required": True, "manual_reason": reason}

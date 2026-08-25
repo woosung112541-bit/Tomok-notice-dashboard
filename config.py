@@ -101,7 +101,21 @@ KNOWN_HARD_DOMAINS = {
     "khnp.co.kr": "AnySign/TouchEn 등 보안 프로그램으로 자동화가 매우 어려움 (K-Pro 전자상거래시스템)",
 }
 
+# 명부 엑셀에서 팀이 이미 "*24년부터 조달청*" 식으로 표시해둔 기관들.
+# 이런 기관은 자체 게시판에 입찰공고가 없는 게 정상일 수 있음(나라장터 API로 별도 수집됨).
+# 자동 수집 자체는 그대로 시도하되(가끔 다른 공지사항이 올라오기도 하므로), 0건이 나왔을 때
+# "구조가 깨졌다"는 오해를 주지 않도록 사유만 다르게 표시한다.
+G2B_MIGRATION_HINT = "조달청"
+
 REQUEST_TIMEOUT = 20
 SELENIUM_PAGE_LOAD_TIMEOUT = 45
 MAX_WORKERS_LIGHT = 4   # requests 전용 사이트 동시 처리 수
 MAX_WORKERS_SELENIUM = 2  # Selenium을 쓰는 사이트는 메모리 문제로 동시 처리 수를 낮게 유지
+
+# 일부 관공서 사이트는 단순 "Mozilla/5.0" 같은 짧은 UA를 봇으로 간주해 차단한다.
+# 실제 브라우저와 가까운 완전한 UA 문자열을 공용으로 사용한다.
+REQUEST_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+}
