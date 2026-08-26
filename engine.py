@@ -38,11 +38,11 @@ def _handler_key_for_domain(domain: str) -> str | None:
 
 
 def _known_hard_reason_for_domain(domain: str) -> str | None:
-    """config.KNOWN_HARD_DOMAINS는 부분 문자열(예: 'khnp.co.kr')로 등록되므로
+    """config.KNOWN_HARD_SITES는 부분 문자열(예: 'khnp.co.kr')로 등록되므로
     dict.get()의 완전 일치가 아니라 부분 일치로 찾아야 한다."""
-    for known_domain, reason in config.KNOWN_HARD_DOMAINS.items():
+    for known_domain, info in config.KNOWN_HARD_SITES.items():
         if known_domain in domain:
-            return reason
+            return info["reason"]
     return None
 
 
@@ -117,7 +117,7 @@ def run_all_sites(all_sites: list[dict], target_date_limit, keywords: list[str])
 
     def _handle_result(res: dict):
         log_info(f"[완료] {res['org_name']} ({len(res['notices'])}건)"
-                 + (" - 수동확인 필요" if res["manual_required"] else ""))
+                 + (" - 실패 로그 등록" if res["manual_required"] else ""))
         if res["found"]:
             collected_orgs.add(res["org_name"])
             all_notices.extend(res["notices"])

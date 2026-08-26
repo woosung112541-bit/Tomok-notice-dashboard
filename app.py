@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 import time
@@ -9,6 +10,7 @@ import gspread
 
 import config
 import storage
+import site_registry
 
 KST = timezone(timedelta(hours=9))
 
@@ -100,7 +102,6 @@ def update_notice_status(notice_keys_to_mark, status_value) -> bool:
 @st.cache_data
 def get_target_org_list():
     try:
-        import os
         base_dir = os.path.dirname(os.path.abspath(__file__))
         df = pd.read_excel(os.path.join(base_dir, config.INPUT_EXCEL_FILENAME), sheet_name=0)
         orgs = df.iloc[:, config.ORG_NAME_COL_INDEX].dropna().astype(str).unique().tolist()
@@ -173,7 +174,7 @@ def render_notice_table(df: pd.DataFrame, key_prefix: str):
 st.sidebar.title("📌 메뉴 선택")
 menu = st.sidebar.radio(
     "이동할 메뉴를 선택하세요:",
-    ["공고 자동수집", "🚨 수동 확인 필요", "🔗 발주처 URL 관리",
+    ["공고 자동수집", "🔍 실패 로그 분석", "🔗 발주처 URL 관리",
      "공고 통계 및 분석", "🎯 타겟 공고 (내 업무)", "📝 게시판 / 메모장"],
 )
 st.sidebar.divider()
@@ -182,8 +183,8 @@ st.sidebar.subheader("🔗 주요 사이트 바로가기")
 for site in config.EXTRA_SITES:
     st.sidebar.link_button(site["org_name"], site["url"])
 st.sidebar.link_button("🛒 나라장터", "https://www.g2b.go.kr/index.jsp")
-for domain, reason in config.KNOWN_HARD_DOMAINS.items():
-    st.sidebar.link_button(f"💧 {domain} (수동 확인)", f"https://{domain}")
+for domain, info in config.KNOWN_HARD_SITES.items():
+    st.sidebar.link_button(f"💧 {info['label']}", info["url"])
 
 st.sidebar.divider()
 last_engine, last_time = get_recent_log()
@@ -196,57 +197,133 @@ if menu == "🔗 발주처 URL 관리":
     st.title("🔗 발주처 전용 URL (게시판 직행) 관리")
     st.info(
         "💡 **로봇이 엑셀의 홈페이지 주소에서 고시공고 게시판을 찾지 못하는 경우, "
-        "이곳에 정확한 게시판 직통 URL을 직접 입력해두세요!**\n\n"
+        "이곳에 정확한 게시판 직통 URL을 등록해두세요!**\n\n"
         "여기에 등록된 URL은 엑셀 주소보다 무조건 우선 적용됩니다."
     )
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    default_url_map = site_registry.get_org_default_url_map(base_dir)
+
     df_url = get_google_sheet(config.SHEET_URL_OVERRIDES)
-    if df_url.empty:
-        df_url = pd.DataFrame([{"발주기관명": "", "정확한_게시판_URL": "", "비고": ""}])
+    override_map = {}
+    if not df_url.empty:
+        for _, r in df_url.iterrows():
+            override_map[str(r.get("발주기관명", ""))] = {
+                "url": str(r.get("정확한_게시판_URL", "")),
+                "note": str(r.get("비고", "")),
+            }
 
-    st.write("▼ 더블클릭하여 수정, 맨 아래 빈칸으로 새 기관 추가, 행 선택 후 Delete로 삭제")
-    edited_url_df = st.data_editor(df_url, num_rows="dynamic", use_container_width=True)
+    tab_edit, tab_add = st.tabs(["✏️ 등록된 발주처 수정", "➕ 새 발주처 추가"])
 
-    if st.button("💾 변경사항 저장하여 로봇에 적용하기", type="primary"):
-        with st.spinner("구글 시트에 저장 중..."):
-            try:
-                _, doc = storage.connect()
+    # ── 탭 1: 이미 명부에 등록된 발주처 중 하나를 '골라서' 수정 ──────────────────
+    with tab_edit:
+        org_list = sorted(default_url_map.keys())
+        labeled_options = [
+            f"⭐ {name}" if name in override_map else name for name in org_list
+        ]
+        picked_label = st.selectbox("발주처 선택 (⭐ = 이미 직통 URL이 등록된 곳)", labeled_options)
+        picked_org = picked_label[2:] if picked_label.startswith("⭐ ") else picked_label
+
+        current_override = override_map.get(picked_org)
+        current_url = current_override["url"] if current_override else default_url_map.get(picked_org, "")
+        current_note = current_override["note"] if current_override else ""
+
+        st.caption(f"현재 사용 중인 주소 ({'직통 URL 등록됨' if current_override else '명부 기본값'}):")
+        st.code(current_url or "(등록된 URL 없음)")
+
+        new_url = st.text_input("새 직통 URL", value=current_url, key="edit_url_input")
+        new_note = st.text_input("비고", value=current_note, key="edit_note_input")
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("💾 이 발주처에 저장", type="primary", use_container_width=True):
+                if not new_url.startswith("http"):
+                    st.error("URL은 http:// 또는 https:// 로 시작해야 합니다.")
+                else:
+                    try:
+                        _, doc = storage.connect()
+                        storage.upsert_url_override(doc, picked_org, new_url, new_note)
+                        get_google_sheet.clear()
+                        st.success(f"✅ '{picked_org}' 직통 URL이 저장되었습니다.")
+                        time.sleep(1)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"저장 중 오류: {e}")
+        with c2:
+            if current_override and st.button("↩️ 기본값으로 되돌리기 (오버라이드 삭제)", use_container_width=True):
                 try:
-                    ws_urls = doc.worksheet(config.SHEET_URL_OVERRIDES)
-                except gspread.exceptions.WorksheetNotFound:
-                    ws_urls = doc.add_worksheet(config.SHEET_URL_OVERRIDES, 100, 3)
-                edited_url_df = edited_url_df.fillna("")
-                data_to_save = [edited_url_df.columns.tolist()] + edited_url_df.values.tolist()
-                ws_urls.clear()
-                ws_urls.update(values=data_to_save, range_name="A1")
-                get_google_sheet.clear()
-                st.success("✅ 저장 완료! 다음 수집부터 이 직통 주소로 탐색합니다.")
-                time.sleep(1.2)
-                st.rerun()
-            except Exception as e:
-                st.error(f"저장 중 오류 발생: {e}")
+                    _, doc = storage.connect()
+                    storage.delete_url_override(doc, picked_org)
+                    get_google_sheet.clear()
+                    st.success(f"✅ '{picked_org}' 오버라이드가 삭제되었습니다. 명부 기본 URL로 되돌아갑니다.")
+                    time.sleep(1)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"삭제 중 오류: {e}")
+
+    # ── 탭 2: 명부에 아예 없는 새 발주처를 추가 (코드/엑셀 수정 없이 바로 수집 대상에 포함됨) ──
+    with tab_add:
+        st.caption("여기서 추가한 발주처는 다음 수집부터 바로 대상에 포함됩니다 (코드/엑셀 수정 불필요).")
+        new_org_name = st.text_input("새 발주기관명", key="new_org_name")
+        new_org_url = st.text_input("게시판 직통 URL", key="new_org_url")
+        new_org_note = st.text_input("비고", key="new_org_note")
+        if st.button("➕ 새 발주처 추가", type="primary"):
+            if not new_org_name.strip():
+                st.error("발주기관명을 입력해주세요.")
+            elif new_org_name.strip() in default_url_map or new_org_name.strip() in override_map:
+                st.error("이미 존재하는 발주기관명입니다. '등록된 발주처 수정' 탭에서 수정해주세요.")
+            elif not new_org_url.startswith("http"):
+                st.error("URL은 http:// 또는 https:// 로 시작해야 합니다.")
+            else:
+                try:
+                    _, doc = storage.connect()
+                    storage.upsert_url_override(doc, new_org_name.strip(), new_org_url.strip(), new_org_note)
+                    get_google_sheet.clear()
+                    st.success(f"✅ 새 발주처 '{new_org_name}'가 추가되었습니다.")
+                    time.sleep(1)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"추가 중 오류: {e}")
+
+    st.divider()
+    st.subheader(f"📋 현재 등록된 직통 URL 목록 ({len(override_map)}건)")
+    if not df_url.empty:
+        st.dataframe(df_url, use_container_width=True, hide_index=True,
+                     column_config={"정확한_게시판_URL": st.column_config.LinkColumn("정확한_게시판_URL")})
+    else:
+        st.info("아직 등록된 직통 URL이 없습니다.")
 
 # ==========================================
-# 🚨 수동 확인 필요
+# 🔍 실패 로그 분석
 # ==========================================
-elif menu == "🚨 수동 확인 필요":
-    st.title("🚨 자동 수집이 어려운 발주처 (수동 확인 필요)")
+elif menu == "🔍 실패 로그 분석":
+    st.title("🔍 실패 로그 분석")
     st.caption(
         "봇 방어/보안 프로그램이 강하거나, 게시판 구조를 자동으로 못 찾은 발주처 목록입니다. "
         "예전처럼 '조용히 실패'하는 대신 여기에 사유와 함께 명시적으로 쌓입니다."
     )
     df_manual = get_google_sheet(config.SHEET_MANUAL_CHECK)
     if df_manual.empty:
-        st.success("현재 수동 확인이 필요한 발주처가 없습니다.")
+        st.success("현재 확인이 필요한 실패 항목이 없습니다.")
     else:
         is_g2b_migrated = df_manual["사유"].astype(str).str.contains("나라장터로 별도 수집", na=False)
-        df_real = df_manual[~is_g2b_migrated]
+        is_network_blocked = df_manual["사유"].astype(str).str.contains("클라우드 IP", na=False)
+        df_real = df_manual[~is_g2b_migrated & ~is_network_blocked]
+        df_network = df_manual[is_network_blocked]
         df_g2b = df_manual[is_g2b_migrated]
 
-        st.markdown(f"#### 🔴 진짜 확인이 필요한 발주처 ({len(df_real)}곳)")
+        st.markdown(f"#### 🔴 구조/셀렉터 확인이 필요한 발주처 ({len(df_real)}곳)")
         if df_real.empty:
             st.success("없습니다.")
         else:
             st.dataframe(df_real, use_container_width=True, hide_index=True,
+                         column_config={"URL": st.column_config.LinkColumn("URL")})
+
+        if not df_network.empty:
+            st.markdown(f"#### 🌐 접속 자체가 차단된 것으로 보이는 발주처 ({len(df_network)}곳)")
+            st.caption("셀렉터 문제가 아니라 서버 접속(타임아웃)부터 실패한 경우입니다. "
+                       "국내 IP 경유가 필요할 가능성이 높습니다 (하단 '수동 확인' 페이지 하단 안내 참고).")
+            st.dataframe(df_network, use_container_width=True, hide_index=True,
                          column_config={"URL": st.column_config.LinkColumn("URL")})
 
         if not df_g2b.empty:

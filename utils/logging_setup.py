@@ -59,8 +59,8 @@ def log_failure(org_name: str, url: str, stage: str, error: Exception | str) -> 
 
 
 def log_manual_required(org_name: str, url: str, reason: str) -> None:
-    """자동 수집을 포기하고 '수동 확인'으로 분류할 때 기록."""
-    logger.info(f"[{org_name}] 자동 수집 불가 -> 수동 확인 필요: {reason}")
+    """자동 수집을 포기하고 실패 로그(대시보드 '🔍 실패 로그 분석')에 남길 때 기록."""
+    logger.info(f"[{org_name}] 자동 수집 불가 -> 실패 로그 등록: {reason}")
     RUN_LOG.append({
         "시각": _now_str(),
         "발주처": org_name,

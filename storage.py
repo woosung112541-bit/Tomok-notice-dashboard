@@ -136,6 +136,33 @@ def write_manual_check_list(doc, manual_items: list[dict]) -> None:
     ws.append_rows(rows)
 
 
+# ── 발주처 URL 오버라이드 (개별 upsert/삭제 - 대시보드에서 목록으로 관리하기 위함) ──────
+def upsert_url_override(doc, org_name: str, url: str, note: str = "") -> None:
+    """특정 발주처의 직통 URL을 등록/수정한다. 이미 있으면 그 행만 갱신, 없으면 새로 추가."""
+    headers = ["발주기관명", "정확한_게시판_URL", "비고"]
+    ws = _get_or_create_worksheet(doc, config.SHEET_URL_OVERRIDES, headers)
+    records = ws.get_all_values()
+    if not records:
+        ws.update(range_name="1:1", values=[headers])
+        records = [headers]
+
+    for i, row in enumerate(records[1:], start=2):  # 1행은 헤더
+        if row and row[0] == org_name:
+            ws.update(range_name=f"A{i}:C{i}", values=[[org_name, url, note]])
+            return
+    ws.append_rows([[org_name, url, note]])
+
+
+def delete_url_override(doc, org_name: str) -> None:
+    """특정 발주처의 URL 오버라이드를 삭제한다 (등록명부의 기본 URL로 되돌아감)."""
+    ws = _get_or_create_worksheet(doc, config.SHEET_URL_OVERRIDES, ["발주기관명", "정확한_게시판_URL", "비고"])
+    records = ws.get_all_values()
+    for i, row in enumerate(records[1:], start=2):
+        if row and row[0] == org_name:
+            ws.delete_rows(i)
+            return
+
+
 # ── 대시보드 동시 실행 방지 락 ─────────────────────────────────────────────────
 def manage_sheet_lock(doc, action: str = "check", engine_name: str = "") -> bool:
     """

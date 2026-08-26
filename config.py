@@ -95,10 +95,15 @@ CUSTOM_HANDLER_DOMAINS = {
     "igunsul.net": "igunsul",
 }
 
-# 일반 Selenium(3단계)까지는 시도하지만, 그래도 안 되면 '수동 확인'으로 분류할 때 참고용으로
-# 미리 알려진, 자동화가 특히 어려운 도메인 (봇 탐지/보안 프로그램 등)
-KNOWN_HARD_DOMAINS = {
-    "khnp.co.kr": "AnySign/TouchEn 등 보안 프로그램으로 자동화가 매우 어려움 (K-Pro 전자상거래시스템)",
+# 일반 Selenium(3단계)까지는 시도하지만, 그래도 안 되면 '실패 로그 분석'에서 참고용으로
+# 보여줄, 미리 알려진 자동화가 특히 어려운 사이트(봇 탐지/보안 프로그램 등).
+# url은 '바로가기' 버튼이 실제로 열어야 할 정확한 페이지(도메인 루트가 아니라 실제 조회 화면).
+KNOWN_HARD_SITES = {
+    "khnp.co.kr": {
+        "label": "한국수력원자력 K-Pro",
+        "url": "https://ebiz.khnp.co.kr/login.do",
+        "reason": "AnySign/TouchEn 등 보안 프로그램으로 자동화가 매우 어려움 (K-Pro 전자상거래시스템)",
+    },
 }
 
 # 명부 엑셀에서 팀이 이미 "*24년부터 조달청*" 식으로 표시해둔 기관들.

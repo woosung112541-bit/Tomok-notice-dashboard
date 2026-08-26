@@ -57,6 +57,13 @@ def _load_sites_from_excel(base_dir: str) -> list[dict]:
     return sites
 
 
+def get_org_default_url_map(base_dir: str) -> dict[str, str]:
+    """발주처명 -> 명부/고정목록 상의 기본 URL. 대시보드에서 오버라이드 입력 전
+    '원래 등록된 주소가 뭐였는지' 보여주기 위한 용도."""
+    sites = _load_sites_from_excel(base_dir) + list(config.EXTRA_SITES)
+    return {s["org_name"]: s["url"] for s in sites}
+
+
 def build_target_sites(base_dir: str, url_overrides: dict[str, str],
                         target_orgs: str = "ALL") -> list[dict]:
     """
@@ -64,15 +71,26 @@ def build_target_sites(base_dir: str, url_overrides: dict[str, str],
     url_overrides : storage.load_run_context()가 구글시트에서 읽어온 {발주기관명: URL}
     target_orgs   : "ALL" 또는 "기관A,기관B" 형태의 콤마 구분 문자열 (부분 조사용)
     """
+    # 명부(엑셀) + 고정 목록(EXTRA_SITES)을 합친 뒤, 오버라이드는 이 전체 목록에
+    # 한 번에 적용한다 (EXTRA_SITES는 원본을 건드리지 않도록 복사해서 사용).
     sites = _load_sites_from_excel(base_dir)
+    sites.extend(dict(s) for s in config.EXTRA_SITES)
 
     # 담당자가 구글시트에 등록한 직통 URL로 덮어쓰기 (기관명에 부분일치)
+    matched_override_keys = set()
     for site in sites:
         for org_key, url_val in url_overrides.items():
             if org_key in site["org_name"]:
                 site["url"] = url_val
+                matched_override_keys.add(org_key)
 
-    sites.extend(config.EXTRA_SITES)
+    # 명부/EXTRA_SITES 어디에도 없는 오버라이드는 완전히 새로운 발주처로 간주해 추가한다.
+    # 이렇게 해야 '발주처 URL 관리' 화면에서 새 발주처를 등록하면 코드/엑셀 수정 없이
+    # 바로 수집 대상에 들어간다.
+    for org_key, url_val in url_overrides.items():
+        if org_key in matched_override_keys:
+            continue
+        sites.append({"url": url_val, "org_name": org_key})
 
     # URL 기준 중복 제거 (뒤에 오는 것이 우선 -> EXTRA_SITES/오버라이드가 우선 적용됨)
     unique = {s["url"]: s for s in sites}.values()
