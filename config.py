@@ -113,6 +113,11 @@ KNOWN_HARD_SITES = {
 G2B_MIGRATION_HINT = "조달청"
 
 REQUEST_TIMEOUT = 20
+# (연결타임아웃, 읽기타임아웃) 튜플로 분리. 접속 자체가 막힌 사이트는 서버가 아예 응답하지
+# 않으므로 5초면 충분히 판단 가능하다 (20초씩 기다릴 필요 없음 - 차단된 사이트가 많을 때
+# 전체 실행 시간을 크게 줄여준다). 반면 접속은 되는데 응답이 느린 사이트를 위해
+# 읽기 타임아웃은 기존처럼 넉넉하게 20초 유지.
+REQUEST_TIMEOUT_TUPLE = (5, REQUEST_TIMEOUT)
 SELENIUM_PAGE_LOAD_TIMEOUT = 45
 MAX_WORKERS_LIGHT = 4   # requests 전용 사이트 동시 처리 수
 MAX_WORKERS_SELENIUM = 2  # Selenium을 쓰는 사이트는 메모리 문제로 동시 처리 수를 낮게 유지

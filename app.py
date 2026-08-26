@@ -387,6 +387,7 @@ elif menu == "공고 자동수집":
                     if storage.manage_sheet_lock(doc, "check"):
                         st.warning("⏳ 현재 다른 팀원이 공고를 수집 중입니다. 잠시 후 시도해주세요.")
                     else:
+                        progress_bar = st.progress(0, text="수집 준비 중...")
                         with st.status("🚀 수집 엔진 가동 중...", expanded=True) as status:
                             try:
                                 storage.manage_sheet_lock(doc, "lock_and_log", engine_name="통합 엔진")
@@ -397,12 +398,28 @@ elif menu == "공고 자동수집":
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                     encoding="utf-8", bufsize=1,
                                 )
-                                for line in iter(process.stdout.readline, ""):
-                                    if line:
-                                        st.write(line.strip())
+                                for raw_line in iter(process.stdout.readline, ""):
+                                    if not raw_line:
+                                        continue
+                                    line = raw_line.strip()
+                                    # engine.py가 사이트 하나 처리를 끝낼 때마다 찍는 진행률 마커.
+                                    # 로그 포맷("[시각] [INFO] ...")과 섞이지 않도록 별도의 단순한
+                                    # "PROGRESS:완료수:전체수" 줄로 내려오며, 여기서만 파싱해서
+                                    # 막대바를 갱신하고 일반 로그 창에는 출력하지 않는다.
+                                    if line.startswith("PROGRESS:"):
+                                        try:
+                                            _, done_str, total_str = line.split(":")
+                                            done, total = int(done_str), int(total_str)
+                                            pct = min(done / total, 1.0) if total else 0.0
+                                            progress_bar.progress(pct, text=f"{done}/{total}곳 처리 완료 ({int(pct * 100)}%)")
+                                        except (ValueError, ZeroDivisionError):
+                                            pass
+                                    else:
+                                        st.write(line)
                                 process.wait()
 
                                 if process.returncode == 0:
+                                    progress_bar.progress(1.0, text="✅ 전체 완료 (100%)")
                                     status.update(label="✅ 공고 수집 완료!", state="complete", expanded=False)
                                     get_google_sheet.clear()
                                 else:

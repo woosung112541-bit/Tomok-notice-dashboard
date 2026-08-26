@@ -78,8 +78,12 @@ def process_site(site: dict, target_date_limit, keywords: list[str]) -> dict:
         if network_error:
             any_network_error = True
 
-    if not any_rows_found:
-        # requests로 행 자체를 못 찾음 -> JS 렌더링이 필요한 사이트일 가능성 -> selenium으로 승격
+    if not any_rows_found and not any_network_error:
+        # requests로 행 자체를 못 찾음(단, 연결 자체는 됐던 경우만) -> JS 렌더링이 필요한
+        # 사이트일 가능성 -> selenium으로 승격.
+        # 연결 자체가 안 됐던 경우(any_network_error=True)는 selenium으로 다시 시도해봐야
+        # 같은 네트워크 경로로 나가는 이상 똑같이 막힐 뿐이라 시간만 낭비한다 (사이트당
+        # 수십 초씩 허비 -> 차단된 사이트가 많을 때 전체 실행 시간이 크게 늘어나는 원인이었음).
         for u in candidate_urls:
             notices, rows_count, network_error = generic_selenium.scrape_board(u, org_name, target_date_limit, keywords)
             all_notices.extend(notices)
@@ -109,15 +113,24 @@ def run_all_sites(all_sites: list[dict], target_date_limit, keywords: list[str])
     """
     사이트 목록을 병렬로 처리한다. requests류와 selenium/custom류를 분리해서
     서로 다른 동시성 수준으로 실행한다 (무거운 selenium을 과도하게 병렬로 띄우지 않기 위함).
+
+    처리 하나가 끝날 때마다 "PROGRESS:완료수:전체수" 형태의 줄을 stdout에 그대로 출력한다.
+    (로깅 포맷을 안 거치는 이유: app.py가 실시간으로 파싱해서 진행률 막대바를 그리기 때문에,
+    파싱하기 쉬운 단순한 고정 포맷이 필요하다.)
     """
     light_sites = [s for s in all_sites if s["handler_type"] == "generic"]
     heavy_sites = [s for s in all_sites if s["handler_type"] == "custom"]
+    total = len(light_sites) + len(heavy_sites)
+    completed = 0
 
     all_notices, collected_orgs, manual_check_items = [], set(), []
 
     def _handle_result(res: dict):
+        nonlocal completed
+        completed += 1
         log_info(f"[완료] {res['org_name']} ({len(res['notices'])}건)"
                  + (" - 실패 로그 등록" if res["manual_required"] else ""))
+        print(f"PROGRESS:{completed}:{total}", flush=True)
         if res["found"]:
             collected_orgs.add(res["org_name"])
             all_notices.extend(res["notices"])

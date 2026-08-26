@@ -77,7 +77,7 @@ def matches_keywords(title: str, keywords: list[str]) -> bool:
 
 def _extract_text_from_attachment(file_url: str, headers: dict) -> str:
     try:
-        res = requests.get(file_url, headers=headers, verify=False, timeout=config.REQUEST_TIMEOUT, stream=True)
+        res = requests.get(file_url, headers=headers, verify=False, timeout=config.REQUEST_TIMEOUT_TUPLE, stream=True)
         if int(res.headers.get("content-length", 0)) > 5_000_000:
             return ""
         content = res.content
@@ -108,7 +108,7 @@ def deep_scan_notice(url: str) -> str:
     headers = config.REQUEST_HEADERS
     full_text = ""
     try:
-        res = requests.get(url, headers=headers, verify=False, timeout=config.REQUEST_TIMEOUT)
+        res = requests.get(url, headers=headers, verify=False, timeout=config.REQUEST_TIMEOUT_TUPLE)
         res.encoding = "utf-8"
         soup = BeautifulSoup(res.text, "html.parser")
         full_text += soup.get_text()
@@ -150,7 +150,7 @@ def discover_additional_boards(base_url: str, domain: str) -> list[str]:
     discovered_iframes = set()
     discovered_menu_links = set()
     try:
-        res = requests.get(base_url, headers=config.REQUEST_HEADERS, verify=False, timeout=15)
+        res = requests.get(base_url, headers=config.REQUEST_HEADERS, verify=False, timeout=config.REQUEST_TIMEOUT_TUPLE)
         soup = BeautifulSoup(res.text, "html.parser")
 
         for iframe in soup.find_all("iframe", src=True):

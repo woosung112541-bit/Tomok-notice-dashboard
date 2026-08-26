@@ -25,7 +25,7 @@ def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]
     headers = config.REQUEST_HEADERS
     results = []
     try:
-        res = requests.get(url, headers=headers, verify=False, timeout=config.REQUEST_TIMEOUT)
+        res = requests.get(url, headers=headers, verify=False, timeout=config.REQUEST_TIMEOUT_TUPLE)
         soup = BeautifulSoup(res.text, "html.parser")
         rows = select_rows(soup)
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
