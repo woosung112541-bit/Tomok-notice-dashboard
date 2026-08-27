@@ -46,7 +46,7 @@ def _known_hard_reason_for_domain(domain: str) -> str | None:
     return None
 
 
-def process_site(site: dict, target_date_limit, keywords: list[str]) -> dict:
+def process_site(site: dict, target_date_limit, keywords: list[str], history_keys: set) -> dict:
     """사이트 하나를 처리하고 결과 dict를 반환한다.
     반환 형태: {org_name, base_url, notices, found, manual_required, manual_reason}
     """
@@ -71,7 +71,8 @@ def process_site(site: dict, target_date_limit, keywords: list[str]) -> dict:
     any_network_error = False
 
     for u in candidate_urls:
-        notices, rows_count, network_error = generic_requests.scrape_board(u, org_name, target_date_limit, keywords)
+        notices, rows_count, network_error = generic_requests.scrape_board(
+            u, org_name, target_date_limit, keywords, history_keys)
         all_notices.extend(notices)
         if rows_count > 0:
             any_rows_found = True
@@ -85,7 +86,8 @@ def process_site(site: dict, target_date_limit, keywords: list[str]) -> dict:
         # 같은 네트워크 경로로 나가는 이상 똑같이 막힐 뿐이라 시간만 낭비한다 (사이트당
         # 수십 초씩 허비 -> 차단된 사이트가 많을 때 전체 실행 시간이 크게 늘어나는 원인이었음).
         for u in candidate_urls:
-            notices, rows_count, network_error = generic_selenium.scrape_board(u, org_name, target_date_limit, keywords)
+            notices, rows_count, network_error = generic_selenium.scrape_board(
+                u, org_name, target_date_limit, keywords, history_keys)
             all_notices.extend(notices)
             if rows_count > 0:
                 any_rows_found = True  # selenium은 게시판을 정상적으로 찾음 (조건에 맞는 공고가 없을 뿐일 수 있음)
@@ -109,7 +111,8 @@ def process_site(site: dict, target_date_limit, keywords: list[str]) -> dict:
             "found": len(all_notices) > 0, "manual_required": False, "manual_reason": ""}
 
 
-def run_all_sites(all_sites: list[dict], target_date_limit, keywords: list[str]) -> dict:
+def run_all_sites(all_sites: list[dict], target_date_limit, keywords: list[str],
+                   history_keys: set | None = None) -> dict:
     """
     사이트 목록을 병렬로 처리한다. requests류와 selenium/custom류를 분리해서
     서로 다른 동시성 수준으로 실행한다 (무거운 selenium을 과도하게 병렬로 띄우지 않기 위함).
@@ -117,7 +120,11 @@ def run_all_sites(all_sites: list[dict], target_date_limit, keywords: list[str])
     처리 하나가 끝날 때마다 "PROGRESS:완료수:전체수" 형태의 줄을 stdout에 그대로 출력한다.
     (로깅 포맷을 안 거치는 이유: app.py가 실시간으로 파싱해서 진행률 막대바를 그리기 때문에,
     파싱하기 쉬운 단순한 고정 포맷이 필요하다.)
+
+    history_keys : 이미 저장된 notice_key 집합. 사이트별 페이지네이션을 몇 페이지나
+    따라갈지 판단하는 데 쓰인다 (scrapers.generic_requests/generic_selenium 참고).
     """
+    history_keys = history_keys or set()
     light_sites = [s for s in all_sites if s["handler_type"] == "generic"]
     heavy_sites = [s for s in all_sites if s["handler_type"] == "custom"]
     total = len(light_sites) + len(heavy_sites)
@@ -141,12 +148,14 @@ def run_all_sites(all_sites: list[dict], target_date_limit, keywords: list[str])
             })
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=config.MAX_WORKERS_LIGHT) as executor:
-        futures = {executor.submit(process_site, s, target_date_limit, keywords): s for s in light_sites}
+        futures = {executor.submit(process_site, s, target_date_limit, keywords, history_keys): s
+                   for s in light_sites}
         for future in concurrent.futures.as_completed(futures):
             _handle_result(future.result())
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=config.MAX_WORKERS_SELENIUM) as executor:
-        futures = {executor.submit(process_site, s, target_date_limit, keywords): s for s in heavy_sites}
+        futures = {executor.submit(process_site, s, target_date_limit, keywords, history_keys): s
+                   for s in heavy_sites}
         for future in concurrent.futures.as_completed(futures):
             _handle_result(future.result())
 

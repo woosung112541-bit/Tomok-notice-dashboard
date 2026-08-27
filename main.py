@@ -104,7 +104,7 @@ def main():
         sys.exit(0)
 
     log_info(f"대상 사이트 {len(all_sites)}곳 처리 시작")
-    run_result = engine.run_all_sites(all_sites, target_date_limit, keywords)
+    run_result = engine.run_all_sites(all_sites, target_date_limit, keywords, ctx["history_keys"])
 
     all_notices = run_result["all_notices"]
 

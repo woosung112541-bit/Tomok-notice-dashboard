@@ -185,29 +185,44 @@ def select_rows(soup: BeautifulSoup):
     return []
 
 
-def find_pagination_urls(soup: BeautifulSoup, base_url: str, max_extra_pages: int = None) -> list[str]:
-    """
-    1페이지 안에 있는 '2', '3' 같은 페이지 번호 링크를 찾아 그 URL들을 반환한다.
-
-    유성구청 도시계획과처럼 하루에 10건 넘게 올리는 게시판은, 다음 수집 때까지
-    새 공고가 그만큼 쌓이면 어제 공고가 2페이지로 밀려난다. 1페이지만 보는
-    기존 방식으로는 이런 경우 밀려난 공고를 영원히 놓치게 된다. 페이지 번호
-    링크는 실제 <a href="...pageIndex=2...">2</a> 형태로 있는 경우에만 따라갈 수
-    있고(onclick만 있고 href가 '#'인 경우는 requests로는 못 감), 그런 경우는
-    selenium 단계에서 링크 텍스트를 눌러 처리해야 하므로 여기서는 다루지 않는다.
-    """
-    if max_extra_pages is None:
-        max_extra_pages = config.MAX_EXTRA_PAGES
-    candidates = {}
+def find_next_page_url(soup: BeautifulSoup, base_url: str, current_page_num: int) -> str | None:
+    """1페이지(또는 현재 페이지) 안에서 '다음 번호(current_page_num+1)' 링크를 찾아 반환한다.
+    없으면 None (더 이상 갈 페이지가 없다는 뜻)."""
+    target_text = str(current_page_num + 1)
     for a_tag in soup.find_all("a", href=True):
-        text = a_tag.get_text(strip=True)
-        if not text.isdigit():
-            continue
-        page_num = int(text)
-        if page_num <= 1:
+        if a_tag.get_text(strip=True) != target_text:
             continue
         href = a_tag["href"].strip()
         if not href or href == "#" or "javascript:" in href.lower():
             continue
-        candidates[page_num] = urllib.parse.urljoin(base_url, href)
-    return [candidates[n] for n in sorted(candidates)[:max_extra_pages]]
+        return urllib.parse.urljoin(base_url, href)
+    return None
+
+
+def page_has_stop_signal(rows, org_name: str, target_date_limit, history_keys: set) -> bool:
+    """
+    현재 페이지 안에 '여기서부터는 더 안 가도 되는 지점'이 있는지 확인한다.
+    게시판은 보통 최신순 정렬이므로, 아래 둘 중 하나라도 만나면 그보다 아래(더
+    오래된 쪽)는 이미 다 지나간 내용이라고 보고 페이지네이션을 멈춘다.
+
+      1) 등록일이 이번 수집 기간(target_date_limit)보다 오래된 행을 만남
+      2) 이미 지난 실행에서 저장된 공고(notice_key가 history_keys에 있음)를 만남
+
+    (제목/링크가 없는 배너·공지성 행은 그냥 건너뛴다.)
+    """
+    for row in rows:
+        title_tag = row.find("a")
+        if not title_tag:
+            continue
+        title = " ".join(title_tag.stripped_strings) or title_tag.get_text(strip=True)
+        if not title:
+            continue
+
+        dates = find_all_dates_in_row(row.stripped_strings)
+        post_date = min(dates) if dates else None
+        if post_date and post_date < target_date_limit:
+            return True
+
+        if f"{org_name}|||{title}" in history_keys:
+            return True
+    return False

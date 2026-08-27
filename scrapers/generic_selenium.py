@@ -18,7 +18,8 @@ from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
 
 import config
-from scrapers.base import extract_row_fields, matches_keywords, deep_scan_notice, select_rows, find_pagination_urls
+from scrapers.base import (extract_row_fields, matches_keywords, deep_scan_notice,
+                            select_rows, find_next_page_url, page_has_stop_signal)
 from utils.logging_setup import log_failure, log_info
 
 
@@ -58,47 +59,58 @@ def get_driver() -> webdriver.Chrome:
     return driver
 
 
-def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]) -> tuple[list[dict], int, bool]:
+def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str],
+                  history_keys: set | None = None) -> tuple[list[dict], int, bool]:
     """
     반환: (수집된 공고 리스트, 발견된 행 개수, 네트워크_접속_실패_여부)
-    generic_requests.scrape_board()와 동일한 규약을 따른다.
+    generic_requests.scrape_board()와 동일한 규약(및 페이지네이션 중지 조건)을 따른다.
     """
+    history_keys = history_keys or set()
     results = []
     driver = None
     all_rows = []
+    current_url = url
+    visited = {url}
+
     try:
         driver = get_driver()
-        driver.get(url)
-        driver.implicitly_wait(2)
-        soup = BeautifulSoup(driver.page_source, "html.parser")
-        rows = select_rows(soup)
-        all_rows.extend(rows)
-    except TimeoutException as e:
-        log_failure(org_name, url, "selenium_load", f"[페이지 로딩 타임아웃 - 네트워크/차단 가능성] {e}")
-        if driver:
-            driver.quit()
-        return results, 0, True
     except Exception as e:
         log_failure(org_name, url, "selenium_load", e)
-        if driver:
-            driver.quit()
         return results, 0, False
 
-    # requests 버전과 동일한 이유로 페이지네이션을 따라간다 (하루 공고량이 많은 게시판 대응).
-    try:
-        extra_page_urls = find_pagination_urls(soup, url)
-        if extra_page_urls:
-            log_info(f"[{org_name}] 페이지네이션 감지 - 추가로 {len(extra_page_urls)}페이지 더 확인")
-            for page_url in extra_page_urls:
-                try:
-                    driver.get(page_url)
-                    driver.implicitly_wait(2)
-                    page_soup = BeautifulSoup(driver.page_source, "html.parser")
-                    all_rows.extend(select_rows(page_soup))
-                except Exception as e:
-                    log_failure(org_name, page_url, "fetch_pagination", e)
-    except Exception:
-        pass  # 페이지네이션은 부가 기능이라, 여기서 문제가 생겨도 1페이지 결과는 그대로 살린다
+    page_num = 0
+    for page_num in range(1, config.MAX_PAGINATION_SAFETY_CAP + 1):
+        try:
+            driver.get(current_url)
+            driver.implicitly_wait(2)
+            soup = BeautifulSoup(driver.page_source, "html.parser")
+            rows = select_rows(soup)
+        except TimeoutException as e:
+            if page_num == 1:
+                log_failure(org_name, url, "selenium_load", f"[페이지 로딩 타임아웃 - 네트워크/차단 가능성] {e}")
+                driver.quit()
+                return results, 0, True
+            break
+        except Exception as e:
+            if page_num == 1:
+                log_failure(org_name, url, "selenium_load", e)
+                driver.quit()
+                return results, 0, False
+            break
+
+        all_rows.extend(rows)
+
+        if not rows or page_has_stop_signal(rows, org_name, target_date_limit, history_keys):
+            break  # 이미 아는 지점(또는 수집기간 밖)에 도달 -> 더 갈 필요 없음
+
+        next_url = find_next_page_url(soup, current_url, page_num)
+        if not next_url or next_url in visited:
+            break
+        visited.add(next_url)
+        current_url = next_url
+
+    if page_num > 1:
+        log_info(f"[{org_name}] 페이지네이션으로 {page_num}페이지까지 확인 후 중단")
 
     for row in all_rows:
         try:
