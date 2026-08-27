@@ -28,6 +28,7 @@ import storage
 import site_registry
 import engine
 from scrapers import api_g2b
+from utils import proxy as proxy_util
 from utils.logging_setup import log_info, log_failure, RUN_LOG
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -40,6 +41,7 @@ def parse_args():
     days_ago = config.DEFAULT_DAYS_AGO
     keywords = config.DEFAULT_KEYWORDS
     target_orgs = "ALL"
+    use_proxy = False
 
     if len(sys.argv) >= 2:
         try:
@@ -50,12 +52,25 @@ def parse_args():
         keywords = [w.strip() for w in sys.argv[2].split(",") if w.strip()]
     if len(sys.argv) >= 4:
         target_orgs = sys.argv[3]
+    if len(sys.argv) >= 5:
+        use_proxy = sys.argv[4] in ("1", "true", "True")
 
-    return days_ago, keywords, target_orgs
+    return days_ago, keywords, target_orgs, use_proxy
 
 
 def main():
-    days_ago, keywords, target_orgs = parse_args()
+    days_ago, keywords, target_orgs, use_proxy = parse_args()
+
+    if use_proxy:
+        found_proxy = proxy_util.pick_working_proxy()
+        if found_proxy:
+            # requests는 HTTP_PROXY/HTTPS_PROXY 환경변수를 자동으로 읽어서 쓰므로
+            # 코드 안의 모든 requests.get() 호출에 별도 수정 없이 그대로 적용된다.
+            os.environ["HTTP_PROXY"] = f"http://{found_proxy}"
+            os.environ["HTTPS_PROXY"] = f"http://{found_proxy}"
+            # selenium(Chrome)은 환경변수를 자동으로 안 읽으므로 별도 변수에 담아두고
+            # scrapers/generic_selenium.py의 get_driver()가 이 값을 읽어 명시적으로 적용한다.
+            os.environ["SCRAPER_SELENIUM_PROXY"] = found_proxy
 
     now_kst = datetime.now(KST).replace(tzinfo=None)
     if days_ago == 0:

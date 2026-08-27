@@ -373,6 +373,15 @@ elif menu == "공고 자동수집":
             "더 이상 엔진을 직접 고를 필요가 없습니다."
         )
 
+        use_proxy = st.toggle("🌐 무료 프록시로 우회 시도 (실험적)", value=False)
+        if use_proxy:
+            st.caption(
+                "⚠️ 무료 공개 프록시를 매번 새로 찾아 시도합니다. **작동을 보장하지 않습니다** — "
+                "살아있는 국내(KR) 프록시가 없으면 자동으로 프록시 없이 진행되고, 그 여부는 "
+                "실행 로그 맨 위 '[프록시]'로 시작하는 줄에서 확인할 수 있습니다. 확실한 우회가 "
+                "필요하면 사무실 회선 기반 셀프호스팅 러너가 더 안정적입니다."
+            )
+
         if st.button("🚀 공고 수집 시작", type="primary", use_container_width=True):
             if not scan_mode and selected_orgs_str == "ALL":
                 st.error("특정 발주처 선택 모드입니다. 기관을 선택해주세요.")
@@ -394,7 +403,8 @@ elif menu == "공고 자동수집":
                                 get_recent_log.clear()
 
                                 process = subprocess.Popen(
-                                    [sys.executable, "-u", "main.py", str(collect_days), collect_keywords, selected_orgs_str],
+                                    [sys.executable, "-u", "main.py", str(collect_days), collect_keywords,
+                                     selected_orgs_str, "1" if use_proxy else "0"],
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                     encoding="utf-8", bufsize=1,
                                 )

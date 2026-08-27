@@ -112,6 +112,18 @@ KNOWN_HARD_SITES = {
 # "구조가 깨졌다"는 오해를 주지 않도록 사유만 다르게 표시한다.
 G2B_MIGRATION_HINT = "조달청"
 
+# ── 무료 공개 프록시 우회 (대시보드 토글로 켜고 끔) ────────────────────────────
+# ProxyScrape 무료 API - 회원가입/키 없이 한국(KR) IP 목록을 텍스트로 제공.
+# proxy_format=ipport 이면 'ip:port' 형태 한 줄씩 내려온다.
+FREE_PROXY_API_URL = (
+    "https://api.proxyscrape.com/v4/free-proxy-list/get"
+    "?request=display_proxies&proxy_format=ipport&format=text"
+    "&country=kr&protocol=http"
+)
+PROXY_TEST_URL = "https://www.naver.com"  # 프록시가 실제로 살아있는지 확인할 때 쓰는 사이트
+PROXY_TEST_TIMEOUT = 6      # 프록시 하나 테스트할 때 기다리는 시간(초)
+PROXY_CANDIDATES_LIMIT = 20  # 앞에서부터 최대 몇 개까지 시도해볼지 (너무 많으면 시작이 느려짐)
+
 REQUEST_TIMEOUT = 20
 # (연결타임아웃, 읽기타임아웃) 튜플로 분리. 접속 자체가 막힌 사이트는 서버가 아예 응답하지
 # 않으므로 5초면 충분히 판단 가능하다 (20초씩 기다릴 필요 없음 - 차단된 사이트가 많을 때

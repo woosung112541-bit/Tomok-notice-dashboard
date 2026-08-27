@@ -8,6 +8,8 @@ scrapers/custom/*.py로 보낸다 (site_registry.py가 handler_type='custom'으�
 get_driver()는 custom 핸들러에서도 재사용한다 (한 곳에서만 Chrome 옵션을 관리하기 위함).
 """
 
+import os
+
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -30,6 +32,12 @@ def get_driver() -> webdriver.Chrome:
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
+
+    # main.py가 프록시 우회 토글이 켜졌을 때 환경변수로 넘겨준 값. Selenium/Chrome은
+    # HTTP_PROXY 환경변수를 자동으로 읽지 않으므로 명시적으로 --proxy-server 옵션을 준다.
+    selenium_proxy = os.environ.get("SCRAPER_SELENIUM_PROXY")
+    if selenium_proxy:
+        options.add_argument(f"--proxy-server=http://{selenium_proxy}")
 
     try:
         service = Service("/usr/bin/chromedriver")
