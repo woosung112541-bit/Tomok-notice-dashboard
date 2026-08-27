@@ -129,7 +129,25 @@ REQUEST_TIMEOUT = 20
 # 않으므로 5초면 충분히 판단 가능하다 (20초씩 기다릴 필요 없음 - 차단된 사이트가 많을 때
 # 전체 실행 시간을 크게 줄여준다). 반면 접속은 되는데 응답이 느린 사이트를 위해
 # 읽기 타임아웃은 기존처럼 넉넉하게 20초 유지.
-REQUEST_TIMEOUT_TUPLE = (5, REQUEST_TIMEOUT)
+#
+# 단, 프록시를 거칠 때는 클라이언트->프록시->대상 서버로 홉이 하나 늘어나고,
+# https:// 사이트는 프록시와 'CONNECT 터널'을 먼저 맺어야 하는데 이 단계도
+# '연결 타임아웃' 값을 쓴다. 무료 프록시는 그 자체로 느릴 수 있어서 5초는
+# 빠듯하다 - 실제로 "그냥 느려서" 실패한 걸 "차단됐다"고 잘못 판단하는 사례가
+# 나왔다. 그래서 프록시 사용 중에는 연결 타임아웃을 더 넉넉하게 준다.
+REQUEST_CONNECT_TIMEOUT_DIRECT = 5
+REQUEST_CONNECT_TIMEOUT_PROXY = 15
+
+
+def get_request_timeout_tuple() -> tuple[int, int]:
+    """지금 프록시를 쓰고 있는지 여부에 따라 연결 타임아웃을 다르게 준다.
+    (모듈 로딩 시점이 아니라 요청 시점에 매번 계산해야 한다 - main.py가 프록시를
+    찾아서 환경변수를 설정하는 시점이 config.py가 import된 다음이기 때문이다.)"""
+    if os.environ.get("HTTP_PROXY"):
+        return (REQUEST_CONNECT_TIMEOUT_PROXY, REQUEST_TIMEOUT)
+    return (REQUEST_CONNECT_TIMEOUT_DIRECT, REQUEST_TIMEOUT)
+
+
 SELENIUM_PAGE_LOAD_TIMEOUT = 45
 # 하루에 공고를 많이 올리는 게시판(예: 유성구청 도시계획과, 하루 10건 이상)은
 # 1페이지만 보면 최근 공고가 이미 2페이지로 밀려나 있을 수 있다. 그래서 페이지를

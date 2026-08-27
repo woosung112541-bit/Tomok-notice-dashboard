@@ -38,7 +38,7 @@ def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]
 
     for page_num in range(1, config.MAX_PAGINATION_SAFETY_CAP + 1):
         try:
-            res = requests.get(current_url, headers=headers, verify=False, timeout=config.REQUEST_TIMEOUT_TUPLE)
+            res = requests.get(current_url, headers=headers, verify=False, timeout=config.get_request_timeout_tuple())
             soup = BeautifulSoup(res.text, "html.parser")
             rows = select_rows(soup)
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
