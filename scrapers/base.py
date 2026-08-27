@@ -183,3 +183,31 @@ def select_rows(soup: BeautifulSoup):
         if rows:
             return rows
     return []
+
+
+def find_pagination_urls(soup: BeautifulSoup, base_url: str, max_extra_pages: int = None) -> list[str]:
+    """
+    1페이지 안에 있는 '2', '3' 같은 페이지 번호 링크를 찾아 그 URL들을 반환한다.
+
+    유성구청 도시계획과처럼 하루에 10건 넘게 올리는 게시판은, 다음 수집 때까지
+    새 공고가 그만큼 쌓이면 어제 공고가 2페이지로 밀려난다. 1페이지만 보는
+    기존 방식으로는 이런 경우 밀려난 공고를 영원히 놓치게 된다. 페이지 번호
+    링크는 실제 <a href="...pageIndex=2...">2</a> 형태로 있는 경우에만 따라갈 수
+    있고(onclick만 있고 href가 '#'인 경우는 requests로는 못 감), 그런 경우는
+    selenium 단계에서 링크 텍스트를 눌러 처리해야 하므로 여기서는 다루지 않는다.
+    """
+    if max_extra_pages is None:
+        max_extra_pages = config.MAX_EXTRA_PAGES
+    candidates = {}
+    for a_tag in soup.find_all("a", href=True):
+        text = a_tag.get_text(strip=True)
+        if not text.isdigit():
+            continue
+        page_num = int(text)
+        if page_num <= 1:
+            continue
+        href = a_tag["href"].strip()
+        if not href or href == "#" or "javascript:" in href.lower():
+            continue
+        candidates[page_num] = urllib.parse.urljoin(base_url, href)
+    return [candidates[n] for n in sorted(candidates)[:max_extra_pages]]

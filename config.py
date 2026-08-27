@@ -131,6 +131,11 @@ REQUEST_TIMEOUT = 20
 # 읽기 타임아웃은 기존처럼 넉넉하게 20초 유지.
 REQUEST_TIMEOUT_TUPLE = (5, REQUEST_TIMEOUT)
 SELENIUM_PAGE_LOAD_TIMEOUT = 45
+# 하루에 공고를 많이 올리는 게시판(예: 유성구청 도시계획과, 하루 10건 이상)은
+# 1페이지만 보면 최근 공고가 이미 2페이지로 밀려나 있을 수 있다. 1페이지에서
+# 페이지 번호 링크(2, 3...)가 보이면 이 숫자만큼 추가로 따라가서 합친다.
+# 너무 크게 잡으면 사이트마다 요청이 늘어나 전체 실행 시간이 늘어나므로 2로 제한.
+MAX_EXTRA_PAGES = 2
 MAX_WORKERS_LIGHT = 4   # requests 전용 사이트 동시 처리 수
 MAX_WORKERS_SELENIUM = 2  # Selenium을 쓰는 사이트는 메모리 문제로 동시 처리 수를 낮게 유지
 

@@ -10,8 +10,8 @@ import requests
 from bs4 import BeautifulSoup
 
 import config
-from scrapers.base import extract_row_fields, matches_keywords, deep_scan_notice, select_rows
-from utils.logging_setup import log_failure
+from scrapers.base import extract_row_fields, matches_keywords, deep_scan_notice, select_rows, find_pagination_urls
+from utils.logging_setup import log_failure, log_info
 
 
 def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]) -> tuple[list[dict], int, bool]:
@@ -24,10 +24,12 @@ def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]
     """
     headers = config.REQUEST_HEADERS
     results = []
+    all_rows = []
     try:
         res = requests.get(url, headers=headers, verify=False, timeout=config.REQUEST_TIMEOUT_TUPLE)
         soup = BeautifulSoup(res.text, "html.parser")
         rows = select_rows(soup)
+        all_rows.extend(rows)
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
         # 접속 자체가 안 되는 경우 (타임아웃/연결거부): 클라우드/해외 IP를 차단하는 사이트일 가능성이 높음.
         # 셀렉터 문제와 구분해서 로그를 남긴다.
@@ -37,7 +39,20 @@ def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]
         log_failure(org_name, url, "fetch", e)
         return results, 0, False
 
-    for row in rows:
+    # 하루에 공고를 많이 올리는 게시판은 1페이지만 보면 최근 것도 이미 2페이지로
+    # 밀려나 있을 수 있다. 1페이지에 페이지 번호 링크가 보이면 몇 페이지 더 따라간다.
+    extra_page_urls = find_pagination_urls(soup, url)
+    if extra_page_urls:
+        log_info(f"[{org_name}] 페이지네이션 감지 - 추가로 {len(extra_page_urls)}페이지 더 확인")
+        for page_url in extra_page_urls:
+            try:
+                page_res = requests.get(page_url, headers=headers, verify=False, timeout=config.REQUEST_TIMEOUT_TUPLE)
+                page_soup = BeautifulSoup(page_res.text, "html.parser")
+                all_rows.extend(select_rows(page_soup))
+            except Exception as e:
+                log_failure(org_name, page_url, "fetch_pagination", e)
+
+    for row in all_rows:
         try:
             fields = extract_row_fields(row, url, target_date_limit)
         except Exception as e:
@@ -54,4 +69,4 @@ def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]
             "특이사항": special,
         })
 
-    return results, len(rows), False
+    return results, len(all_rows), False

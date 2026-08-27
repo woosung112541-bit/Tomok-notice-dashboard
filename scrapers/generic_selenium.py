@@ -18,8 +18,8 @@ from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
 
 import config
-from scrapers.base import extract_row_fields, matches_keywords, deep_scan_notice, select_rows
-from utils.logging_setup import log_failure
+from scrapers.base import extract_row_fields, matches_keywords, deep_scan_notice, select_rows, find_pagination_urls
+from utils.logging_setup import log_failure, log_info
 
 
 def get_driver() -> webdriver.Chrome:
@@ -65,12 +65,14 @@ def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]
     """
     results = []
     driver = None
+    all_rows = []
     try:
         driver = get_driver()
         driver.get(url)
         driver.implicitly_wait(2)
         soup = BeautifulSoup(driver.page_source, "html.parser")
         rows = select_rows(soup)
+        all_rows.extend(rows)
     except TimeoutException as e:
         log_failure(org_name, url, "selenium_load", f"[페이지 로딩 타임아웃 - 네트워크/차단 가능성] {e}")
         if driver:
@@ -82,7 +84,23 @@ def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]
             driver.quit()
         return results, 0, False
 
-    for row in rows:
+    # requests 버전과 동일한 이유로 페이지네이션을 따라간다 (하루 공고량이 많은 게시판 대응).
+    try:
+        extra_page_urls = find_pagination_urls(soup, url)
+        if extra_page_urls:
+            log_info(f"[{org_name}] 페이지네이션 감지 - 추가로 {len(extra_page_urls)}페이지 더 확인")
+            for page_url in extra_page_urls:
+                try:
+                    driver.get(page_url)
+                    driver.implicitly_wait(2)
+                    page_soup = BeautifulSoup(driver.page_source, "html.parser")
+                    all_rows.extend(select_rows(page_soup))
+                except Exception as e:
+                    log_failure(org_name, page_url, "fetch_pagination", e)
+    except Exception:
+        pass  # 페이지네이션은 부가 기능이라, 여기서 문제가 생겨도 1페이지 결과는 그대로 살린다
+
+    for row in all_rows:
         try:
             fields = extract_row_fields(row, url, target_date_limit)
         except Exception as e:
@@ -100,4 +118,4 @@ def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]
         })
 
     driver.quit()
-    return results, len(rows), False
+    return results, len(all_rows), False
