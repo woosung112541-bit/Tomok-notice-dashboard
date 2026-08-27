@@ -11,6 +11,7 @@ import gspread
 import config
 import storage
 import site_registry
+import github_actions
 
 KST = timezone(timedelta(hours=9))
 
@@ -384,10 +385,28 @@ elif menu == "공고 자동수집":
                 "⚠️ 무료 공개 프록시를 매번 새로 찾아 시도합니다. **작동을 보장하지 않습니다** — "
                 "살아있는 국내(KR) 프록시가 없으면 자동으로 프록시 없이 진행되고, 그 여부는 "
                 "실행 로그 맨 위 '[프록시]'로 시작하는 줄에서 확인할 수 있습니다. 확실한 우회가 "
-                "필요하면 사무실 회선 기반 셀프호스팅 러너가 더 안정적입니다."
+                "필요하면 아래 '사무실 PC로 수집'이 더 안정적입니다."
             )
 
-        if st.button("🚀 공고 수집 시작", type="primary", use_container_width=True):
+        st.divider()
+        col_run1, col_run2 = st.columns(2)
+
+        # ── 버튼 1: 지금 바로 (Streamlit Cloud에서 직접 실행) ──────────────────
+        with col_run1:
+            run_now_clicked = st.button("🚀 지금 바로 수집 (클라우드)", type="primary", use_container_width=True)
+            st.caption("빠르지만, 일부 사이트는 클라우드 IP를 차단해서 못 잡을 수 있음 (약 80~85%)")
+
+        # ── 버튼 2: 사무실 PC(GitHub Actions 셀프호스팅 러너)에게 맡기기 ─────────
+        with col_run2:
+            github_ready = github_actions.is_configured()
+            run_office_clicked = st.button(
+                "🏢 사무실 PC로 확실하게 수집", use_container_width=True,
+                disabled=not github_ready,
+                help=None if github_ready else "GITHUB_TOKEN / GITHUB_REPO 시크릿을 등록하면 활성화됩니다.",
+            )
+            st.caption("느리지만(사무실 PC가 켜져 있어야 함), 클라우드 IP 차단을 대부분 우회함")
+
+        if run_now_clicked:
             if not scan_mode and selected_orgs_str == "ALL":
                 st.error("특정 발주처 선택 모드입니다. 기관을 선택해주세요.")
             else:
@@ -399,12 +418,11 @@ elif menu == "공고 자동수집":
 
                 if doc is not None:
                     if storage.manage_sheet_lock(doc, "check"):
-                        st.warning("⏳ 현재 다른 팀원이 공고를 수집 중입니다. 잠시 후 시도해주세요.")
+                        st.warning("⏳ 현재 다른 실행(클라우드 또는 사무실 PC)이 진행 중입니다. 잠시 후 시도해주세요.")
                     else:
                         progress_bar = st.progress(0, text="수집 준비 중...")
                         with st.status("🚀 수집 엔진 가동 중...", expanded=True) as status:
                             try:
-                                storage.manage_sheet_lock(doc, "lock_and_log", engine_name="통합 엔진")
                                 get_recent_log.clear()
 
                                 process = subprocess.Popen(
@@ -441,9 +459,48 @@ elif menu == "공고 자동수집":
                                     status.update(label="❌ 수집 실패 (로그 확인 필요)", state="error", expanded=True)
                             except Exception as e:
                                 status.update(label=f"❌ 시스템 오류: {e}", state="error", expanded=True)
-                            finally:
-                                storage.manage_sheet_lock(doc, "unlock")
+                            # 잠금 해제는 main.py가 자체적으로 처리한다 (Streamlit/GitHub Actions
+                            # 어느 경로로 실행되든 동일하게 잠기고 풀리도록 하기 위함).
                         st.rerun()
+
+        if run_office_clicked:
+            if not scan_mode and selected_orgs_str == "ALL":
+                st.error("특정 발주처 선택 모드입니다. 기관을 선택해주세요.")
+            else:
+                try:
+                    _, doc = storage.connect()
+                    already_running = storage.manage_sheet_lock(doc, "check")
+                except Exception:
+                    already_running = False  # 확인 실패해도 요청 자체는 시도해본다
+
+                if already_running:
+                    st.warning("⏳ 현재 다른 실행(클라우드 또는 사무실 PC)이 진행 중입니다. 잠시 후 시도해주세요.")
+                else:
+                    ok, msg = github_actions.dispatch_workflow(
+                        collect_days, collect_keywords, selected_orgs_str, use_proxy,
+                        ref=config.GITHUB_BRANCH,
+                    )
+                    if ok:
+                        st.success(f"✅ {msg} 사무실 PC가 켜져 있으면 잠시 후 시작됩니다. "
+                                   "아래에서 진행 상태를 확인하거나, GitHub Actions 페이지에서 실시간 로그를 볼 수 있습니다.")
+                    else:
+                        st.error(f"❌ 요청 실패: {msg}")
+
+        if github_ready:
+            with st.expander("🏢 사무실 PC(GitHub Actions) 최근 실행 상태", expanded=run_office_clicked):
+                if st.button("🔄 상태 새로고침"):
+                    st.rerun()
+                run_info = github_actions.get_latest_run()
+                if not run_info:
+                    st.info("아직 실행 기록이 없거나 상태를 가져오지 못했습니다.")
+                else:
+                    status_map = {"queued": "⏳ 대기 중", "in_progress": "🏃 실행 중", "completed": "완료됨"}
+                    conclusion_map = {"success": "✅ 성공", "failure": "❌ 실패", None: ""}
+                    label = status_map.get(run_info["status"], run_info["status"])
+                    if run_info["status"] == "completed":
+                        label += f" - {conclusion_map.get(run_info['conclusion'], run_info['conclusion'])}"
+                    st.write(f"**상태**: {label}  \n**시작 시각**: {run_info['created_at']}")
+                    st.link_button("GitHub Actions에서 실시간 로그 보기", run_info["html_url"])
 
     st.divider()
 

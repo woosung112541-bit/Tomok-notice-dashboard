@@ -94,33 +94,44 @@ def main():
         log_failure("시스템", "-", "google_sheet_connect", e)
         sys.exit(1)
 
-    ctx = storage.load_run_context(doc)
-
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    all_sites = site_registry.build_target_sites(base_dir, ctx["url_overrides"], target_orgs)
-
-    if not all_sites:
-        log_info("대상 사이트가 없습니다 (명부 확인 필요).")
+    # 잠금 관리를 main.py 안으로 옮겨서, Streamlit 버튼이든 GitHub Actions(사무실 PC)든
+    # 실행 경로에 상관없이 서로의 실행 여부를 알 수 있게 한다. (예전에는 app.py의
+    # 구독형 실행 흐름에만 잠금이 있어서, 다른 경로로 실행하면 서로 못 알아챘다.)
+    if storage.manage_sheet_lock(doc, "check"):
+        log_info("다른 실행이 이미 진행 중인 것으로 확인됨 - 중복 실행을 막기 위해 종료합니다.")
         sys.exit(0)
+    storage.manage_sheet_lock(doc, "lock_and_log", engine_name="통합 엔진")
 
-    log_info(f"대상 사이트 {len(all_sites)}곳 처리 시작")
-    run_result = engine.run_all_sites(all_sites, target_date_limit, keywords, ctx["history_keys"])
+    try:
+        ctx = storage.load_run_context(doc)
 
-    all_notices = run_result["all_notices"]
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        all_sites = site_registry.build_target_sites(base_dir, ctx["url_overrides"], target_orgs)
 
-    if target_orgs == "ALL":
-        g2b_notices = api_g2b.fetch(config.G2B_API_KEY, days_ago, keywords)
-        all_notices.extend(g2b_notices)
-        log_info(f"[나라장터 API] {len(g2b_notices)}건 수집")
+        if not all_sites:
+            log_info("대상 사이트가 없습니다 (명부 확인 필요).")
+            return
 
-    added = storage.append_notices(ctx["ws_notices"], all_notices, ctx["history_keys"], current_time)
-    storage.append_collected_orgs(ctx["ws_collected"], run_result["collected_orgs"])
-    storage.write_manual_check_list(doc, run_result["manual_check_items"])
-    storage.write_run_log(doc, RUN_LOG)
+        log_info(f"대상 사이트 {len(all_sites)}곳 처리 시작")
+        run_result = engine.run_all_sites(all_sites, target_date_limit, keywords, ctx["history_keys"])
 
-    log_info(f"[종료] 신규 공고 {added}건 저장 완료 / "
-             f"수동확인 필요 {len(run_result['manual_check_items'])}곳 / "
-             f"경고·오류 로그 {len(RUN_LOG)}건")
+        all_notices = run_result["all_notices"]
+
+        if target_orgs == "ALL":
+            g2b_notices = api_g2b.fetch(config.G2B_API_KEY, days_ago, keywords)
+            all_notices.extend(g2b_notices)
+            log_info(f"[나라장터 API] {len(g2b_notices)}건 수집")
+
+        added = storage.append_notices(ctx["ws_notices"], all_notices, ctx["history_keys"], current_time)
+        storage.append_collected_orgs(ctx["ws_collected"], run_result["collected_orgs"])
+        storage.write_manual_check_list(doc, run_result["manual_check_items"])
+        storage.write_run_log(doc, RUN_LOG)
+
+        log_info(f"[종료] 신규 공고 {added}건 저장 완료 / "
+                 f"수동확인 필요 {len(run_result['manual_check_items'])}곳 / "
+                 f"경고·오류 로그 {len(RUN_LOG)}건")
+    finally:
+        storage.manage_sheet_lock(doc, "unlock")
 
 
 if __name__ == "__main__":

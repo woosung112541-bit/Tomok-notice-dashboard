@@ -46,6 +46,15 @@ IGUNSUL_ID = get_secret("IGUNSUL_ID")
 IGUNSUL_PW = get_secret("IGUNSUL_PW")
 DASHBOARD_PASSWORD = get_secret("DASHBOARD_PASSWORD", "0804")
 
+# 대시보드의 '🏢 사무실 PC로 확실하게 수집' 버튼용 - GitHub Actions 워크플로우를
+# 원격으로 실행시키기 위한 값. GITHUB_TOKEN은 이 저장소에 대해
+# 'Actions: Read and write' 권한이 있는 Personal Access Token, GITHUB_REPO는
+# "owner/repository" 형식(예: "nc-company/Tomok-notice-dashboard").
+# 둘 다 없으면 그 버튼은 자동으로 비활성화된다(github_actions.is_configured() 참고).
+GITHUB_TOKEN = get_secret("GITHUB_TOKEN")
+GITHUB_REPO = get_secret("GITHUB_REPO")
+GITHUB_BRANCH = get_secret("GITHUB_BRANCH", "main")
+
 # ── 구글 시트 ────────────────────────────────────────────────────────────────
 GOOGLE_KEY_FILE = "google_key.json"  # get_secret("GOOGLE_CREDENTIALS")를 이 경로에 런타임에 기록해서 사용
 GOOGLE_SHEET_NAME = "맞춤공고_DB"
