@@ -339,6 +339,11 @@ elif menu == "🔍 실패 로그 분석":
     if df_log.empty:
         st.info("기록된 로그가 없습니다.")
     else:
+        proxy_notes = df_log[df_log["단계"] == "proxy_status"]
+        if not proxy_notes.empty:
+            last_proxy_note = proxy_notes.iloc[-1]
+            st.caption(f"🌐 가장 최근 실행의 프록시 상태: **{last_proxy_note['오류메시지']}** "
+                       f"({last_proxy_note['시각']})")
         st.dataframe(df_log.tail(200), use_container_width=True, hide_index=True)
 
 # ==========================================

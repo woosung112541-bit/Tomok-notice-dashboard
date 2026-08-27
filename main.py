@@ -29,7 +29,7 @@ import site_registry
 import engine
 from scrapers import api_g2b
 from utils import proxy as proxy_util
-from utils.logging_setup import log_info, log_failure, RUN_LOG
+from utils.logging_setup import log_info, log_failure, log_system_note, RUN_LOG
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 warnings.filterwarnings("ignore", module="bs4")
@@ -71,6 +71,11 @@ def main():
             # selenium(Chrome)은 환경변수를 자동으로 안 읽으므로 별도 변수에 담아두고
             # scrapers/generic_selenium.py의 get_driver()가 이 값을 읽어 명시적으로 적용한다.
             os.environ["SCRAPER_SELENIUM_PROXY"] = found_proxy
+            log_system_note("proxy_status", f"프록시 사용함: {found_proxy}")
+        else:
+            log_system_note("proxy_status", "프록시 사용 시도했지만 살아있는 프록시를 찾지 못해 직접 연결로 진행")
+    else:
+        log_system_note("proxy_status", "프록시 미사용 (토글 꺼짐)")
 
     now_kst = datetime.now(KST).replace(tzinfo=None)
     if days_ago == 0:

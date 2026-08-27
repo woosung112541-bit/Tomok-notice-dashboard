@@ -69,3 +69,19 @@ def log_manual_required(org_name: str, url: str, reason: str) -> None:
         "오류유형": "-",
         "오류메시지": reason,
     })
+
+
+def log_system_note(stage: str, message: str) -> None:
+    """실패는 아니지만 나중에 '실패 로그 분석' 화면에서 확인하고 싶은 실행 정보
+    (예: 이번 실행에 프록시를 실제로 찾아서 썼는지)를 run_log에 정식으로 남긴다.
+    지금까지는 이런 정보가 실행 중 잠깐 뜨는 콘솔 로그에만 남고 사라져서,
+    나중에 '이번에 프록시가 진짜 걸렸었나?'를 로그만 보고는 알 수 없었다."""
+    logger.info(f"[시스템] {message}")
+    RUN_LOG.append({
+        "시각": _now_str(),
+        "발주처": "시스템",
+        "URL": "-",
+        "단계": stage,
+        "오류유형": "Info",
+        "오류메시지": message,
+    })
