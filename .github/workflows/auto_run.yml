@@ -26,7 +26,7 @@ jobs:
   run-auto-scraper:
     runs-on: self-hosted
     env:
-      PYTHON_EXE: C:\Python\bin\python.exe
+      PYTHON_EXE: C:\Program Files\Python311\python.exe
 
     steps:
       - name: 1. 저장소 코드 가져오기
