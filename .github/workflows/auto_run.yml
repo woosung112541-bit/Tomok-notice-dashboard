@@ -24,9 +24,6 @@ on:
 
 jobs:
   run-auto-scraper:
-    # 사무실 Windows PC에 등록한 셀프호스팅 러너에서 실행한다.
-    # (GitHub이 제공하는 ubuntu-latest 대신 우리 PC가 직접 작업을 받아서 처리 ->
-    #  실제 대전 회사 IP로 접속하게 되어 클라우드 IP 차단을 우회할 수 있다)
     runs-on: self-hosted
 
     steps:
@@ -38,24 +35,19 @@ jobs:
         with:
           python-version: '3.11'
 
-      # Chrome 브라우저는 이 단계에서 설치하지 않는다. GitHub이 제공하는 러너와 달리
-      # 셀프호스팅 러너는 실행이 끝나도 컴퓨터/환경이 초기화되지 않으므로, Chrome은
-      # 이 PC에 미리 한 번만 설치해두면 계속 재사용된다 (설정 가이드의 '사전 준비' 참고).
-
       - name: 3. 필수 패키지 설치
-        shell: bash
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # 예전 워크플로우는 google_key.json을 만드는 단계가 아예 없어서
-      # main.py가 구글 시트 연결 단계에서 항상 실패했다. 이 단계가 그 원인을 고친다.
       - name: 4. 구글 서비스계정 키 파일 생성
-        shell: bash
-        run: echo '${{ secrets.GOOGLE_CREDENTIALS }}' > google_key.json
+        run: |
+          $json = @'
+          ${{ secrets.GOOGLE_CREDENTIALS }}
+          '@
+          $json | Out-File -FilePath google_key.json -Encoding utf8 -NoNewline
 
       - name: 5. 공고 자동 수집 실행
-        shell: bash
         env:
           G2B_API_KEY: ${{ secrets.G2B_API_KEY }}
           IGUNSUL_ID: ${{ secrets.IGUNSUL_ID }}
@@ -65,8 +57,4 @@ jobs:
 
       - name: 6. 임시 키 파일 정리
         if: always()
-        shell: bash
-        run: rm -f google_key.json
-
-      # 참고: 실제 수집 결과는 전부 구글 시트로 저장되므로(main.py -> storage.py),
-      # 이 저장소에는 커밋할 산출물이 없다.
+        run: Remove-Item -Path google_key.json -Force -ErrorAction SilentlyContinue
