@@ -41,7 +41,7 @@ jobs:
         env:
           GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
         run: |
-          Set-Content -Path google_key.json -Value $env:GOOGLE_CREDENTIALS -Encoding utf8 -NoNewline
+          [System.IO.File]::WriteAllText("$PWD\google_key.json", $env:GOOGLE_CREDENTIALS, (New-Object System.Text.UTF8Encoding $false))
 
       - name: 4. 공고 자동 수집 실행
         env:
