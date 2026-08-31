@@ -100,7 +100,6 @@ def update_notice_status(notice_keys_to_mark, status_value) -> bool:
         return False
 
 
-@st.cache_data
 def _render_stuck_lock_warning(doc, key_suffix: str):
     """'다른 실행이 진행 중' 경고와 함께, 취소/비정상종료로 락이 안 풀렸을 때
     수동으로 즉시 풀 수 있는 버튼을 보여준다. (15분이 지나면 자동으로도 풀리지만,
@@ -121,6 +120,7 @@ def _render_stuck_lock_warning(doc, key_suffix: str):
             st.rerun()
 
 
+@st.cache_data
 def get_target_org_list():
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
