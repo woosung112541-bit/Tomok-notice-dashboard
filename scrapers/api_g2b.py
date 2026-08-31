@@ -3,8 +3,10 @@ scrapers/api_g2b.py
 ---------------------
 1순위(제미나이 원칙 #3): 공식 Open API가 있는 나라장터는 화면을 긁지 않고 API를 쓴다.
 
-업무구분(물품/용역/공사/외자) 4가지 오퍼레이션을 모두 호출한다. 예전에는 시설공사/
-용역/일반 3개만 있어서 물품·외자 공고가 통째로 빠져 있었다.
+업무구분(물품/용역/공사/외자 + 기타공고) 5가지 오퍼레이션을 모두 호출한다. 예전에는
+잘못된 주소(BidPublicInfoService04, /ad/ 경로 누락)와 지어낸 오퍼레이션명을 쓰고
+있어서 전부 "NO_OPENAPI_SERVICE_ERROR"로 실패하고 있었다 - 공공데이터포털의 실제
+'활용신청 상세기능정보' 화면에서 정확한 End Point와 오퍼레이션명을 확인해서 바로잡음.
 
 키워드 필터는 적용하지 않는다 (사용자 결정: "키워드 없이 전부 수집, 대신 대시보드
 에서 검색해서 보기"). 나라장터 정식 입찰공고 제목은 게시판 공지 제목과 달리
@@ -22,19 +24,19 @@ from utils.logging_setup import log_failure, log_system_note
 
 KST = timezone(timedelta(hours=9))
 
-# "getFcltyBidPblancListInfoServc"(시설공사), "getServcBidPblancListInfoServc"(용역),
-# "getBidPblancListInfoServc"(일반/공사)는 기존에 실제로 동작이 확인된 오퍼레이션이다.
-# "getThngBidPblancListInfoServc"(물품), "getFrgcptBidPblancListInfoServc"(외자)는
-# 같은 명명 규칙(get + 업무구분 + BidPblancListInfoServc)에 따라 새로 추가한 것으로,
-# 아직 실제 응답을 확인하지 못했다. 혹시 정확한 오퍼레이션명이 아니어서 실패해도
-# 아래 for문이 사이트별로 개별 실패 처리를 하므로 나머지 3개는 정상 동작한다 -
-# 실행 로그의 "나라장터" 관련 줄에서 이 두 개가 성공했는지 확인해달라.
+# 공공데이터포털 '활용신청 상세기능정보' 화면에서 직접 확인한 실제 End Point.
+# (예전 코드는 http://apis.data.go.kr/1230000/BidPublicInfoService04/ 를 썼는데,
+#  이 주소 자체가 존재하지 않아서 5개 오퍼레이션 전부 실패하고 있었다.)
+BASE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService"
+
+# 마찬가지로 화면에서 직접 확인한 정확한 오퍼레이션명 (업무구분별 입찰공고목록조회 4개
+# + 어디에도 안 맞는 공고를 담는 '기타공고조회' 1개, 총 5개).
 ENDPOINTS = [
-    "getFcltyBidPblancListInfoServc",   # 시설공사
-    "getServcBidPblancListInfoServc",   # 용역
-    "getBidPblancListInfoServc",        # 일반(공사 등)
-    "getThngBidPblancListInfoServc",    # 물품 (신규 추가, 검증 필요)
-    "getFrgcptBidPblancListInfoServc",  # 외자 (신규 추가, 검증 필요)
+    "getBidPblancListInfoCnstwk",  # 공사
+    "getBidPblancListInfoServc",   # 용역
+    "getBidPblancListInfoThng",    # 물품
+    "getBidPblancListInfoFrgcpt",  # 외자
+    "getBidPblancListInfoEtc",     # 기타공고 (4개 업무구분에 안 맞는 나머지)
 ]
 
 
@@ -57,7 +59,7 @@ def fetch(api_key: str, days_ago: int) -> list[dict]:
     seen = set()
 
     for endpoint in ENDPOINTS:
-        url = f"http://apis.data.go.kr/1230000/BidPublicInfoService04/{endpoint}"
+        url = f"{BASE_URL}/{endpoint}"
         params = {
             "serviceKey": api_key, "numOfRows": "999", "pageNo": "1",
             "inqryDiv": "1", "inqryBgnDt": start_dt, "inqryEndDt": end_dt, "type": "json",

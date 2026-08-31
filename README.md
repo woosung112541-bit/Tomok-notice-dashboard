@@ -167,12 +167,16 @@ streamlit run app.py
 
 ## 나라장터(G2B) 수집 범위 확대
 
-기존에는 나라장터 업무구분(물품/용역/공사/외자) 4가지 중 물품·외자가 통째로
-빠져 있었다. 같은 명명 규칙으로 두 오퍼레이션을 추가했다(`getThngBidPblancListInfoServc`,
-`getFrgcptBidPblancListInfoServc`) - 다만 이 둘은 실제 응답을 아직 확인하지 못했으니,
-첫 실행 후 "실패 로그 분석" 화면에서 `g2b_endpoint` 단계 기록을 보고 각 오퍼레이션이
-몇 건씩 받아왔는지 확인해달라 (혹시 오퍼레이션명이 틀렸다면 그 항목만 HTTP 오류로
-남고 나머지 3개는 그대로 정상 동작한다).
+**(중요 수정) 주소 자체가 틀려서 전부 실패하고 있었음**: 실제 실행 로그로 확인해보니
+기존 3개 오퍼레이션(원래 되던 것 포함)까지 전부 `NO_OPENAPI_SERVICE_ERROR`로 실패하고
+있었다. 원인은 End Point 주소 자체가 잘못됐던 것 - `http://apis.data.go.kr/1230000/
+BidPublicInfoService04/...` 를 쓰고 있었는데, 공공데이터포털 '활용신청 상세기능정보'
+화면에서 실제 승인받은 주소를 직접 확인해보니 `https://apis.data.go.kr/1230000/ad/
+BidPublicInfoService/...` 였다 (04 없음, /ad/ 경로 있음). 오퍼레이션명도 대부분
+지어낸 이름이었어서, 화면에 나온 정확한 이름(`getBidPblancListInfoCnstwk`(공사),
+`getBidPblancListInfoServc`(용역), `getBidPblancListInfoThng`(물품),
+`getBidPblancListInfoFrgcpt`(외자), `getBidPblancListInfoEtc`(기타공고))으로 전부
+교체했다. 이제 업무구분 4개 + 기타공고까지 총 5개를 가져온다.
 
 **키워드 필터 제거**: 나라장터 정식 입찰공고 제목은 게시판 공지 제목과 형식이 달라서
 ("OO 교량 정밀안전진단 용역"처럼 실제 사업명) 게시판용 키워드("모집,안전,공고")가
