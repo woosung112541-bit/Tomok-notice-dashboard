@@ -118,7 +118,7 @@ def main():
         all_notices = run_result["all_notices"]
 
         if target_orgs == "ALL":
-            g2b_notices = api_g2b.fetch(config.G2B_API_KEY, days_ago, keywords)
+            g2b_notices = api_g2b.fetch(config.G2B_API_KEY, days_ago)
             all_notices.extend(g2b_notices)
             log_info(f"[나라장터 API] {len(g2b_notices)}건 수집")
 
