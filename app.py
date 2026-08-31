@@ -101,6 +101,26 @@ def update_notice_status(notice_keys_to_mark, status_value) -> bool:
 
 
 @st.cache_data
+def _render_stuck_lock_warning(doc, key_suffix: str):
+    """'다른 실행이 진행 중' 경고와 함께, 취소/비정상종료로 락이 안 풀렸을 때
+    수동으로 즉시 풀 수 있는 버튼을 보여준다. (15분이 지나면 자동으로도 풀리지만,
+    GitHub Actions에서 '취소'를 누르면 프로세스가 강제 종료되면서 락을 푸는 코드가
+    실행될 기회 없이 죽어버려, 그 15분을 그냥 기다려야 하는 문제가 실제로 있었다.)
+    """
+    st.warning("⏳ 현재 다른 실행(클라우드 또는 사무실 PC)이 진행 중입니다. 잠시 후 시도해주세요.")
+    with st.expander("혹시 방금 실행을 '취소'하셨나요? (강제로 잠금 풀기)"):
+        st.caption(
+            "⚠️ 실제로 다른 곳에서 아직 실행 중이라면 누르지 마세요 - 두 실행이 동시에 "
+            "돌면서 서로 꼬일 수 있습니다. 방금 GitHub Actions나 이 화면에서 실행을 "
+            "중간에 '취소'하신 경우에만 눌러주세요 (취소하면 잠금을 풀 틈도 없이 "
+            "바로 꺼지기 때문에, 원래는 15분 뒤 자동으로 풀리는데 그걸 기다리지 않아도 되게 해줍니다)."
+        )
+        if st.button("🔓 지금 바로 잠금 강제 해제", key=f"force_unlock_{key_suffix}"):
+            storage.manage_sheet_lock(doc, "unlock")
+            st.success("잠금을 해제했습니다. 다시 시도해주세요.")
+            st.rerun()
+
+
 def get_target_org_list():
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -419,7 +439,7 @@ elif menu == "공고 자동수집":
 
                 if doc is not None:
                     if storage.manage_sheet_lock(doc, "check"):
-                        st.warning("⏳ 현재 다른 실행(클라우드 또는 사무실 PC)이 진행 중입니다. 잠시 후 시도해주세요.")
+                        _render_stuck_lock_warning(doc, "cloud")
                     else:
                         progress_bar = st.progress(0, text="수집 준비 중...")
                         with st.status("🚀 수집 엔진 가동 중...", expanded=True) as status:
@@ -475,7 +495,7 @@ elif menu == "공고 자동수집":
                     already_running = False  # 확인 실패해도 요청 자체는 시도해본다
 
                 if already_running:
-                    st.warning("⏳ 현재 다른 실행(클라우드 또는 사무실 PC)이 진행 중입니다. 잠시 후 시도해주세요.")
+                    _render_stuck_lock_warning(doc, "office")
                 else:
                     ok, msg = github_actions.dispatch_workflow(
                         collect_days, collect_keywords, selected_orgs_str, use_proxy,
