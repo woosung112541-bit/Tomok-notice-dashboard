@@ -31,6 +31,12 @@ try:
 except ImportError:
     PdfReader = None
 
+# "아산시 공고 제2026-3026호", "OO시 고시 제123호" 처럼 '공고/고시 번호' 형식만
+# 담은 텍스트를 가려내기 위한 패턴. 아산시처럼 '고시공고번호' 열과 '제목' 열이
+# 따로 있는 게시판에서, 링크가 번호 쪽에 걸려있으면 지금까지는 번호만 제목으로
+# 잘못 저장되고 있었다 (실제 제목은 옆 칸의 일반 텍스트였음).
+_NOTICE_NUMBER_PATTERN = re.compile(r'^[가-힣0-9\s]{0,20}(공고|고시)\s*제?\s*[\d\-]+\s*호$')
+
 
 def resolve_link(base_url: str, href: str, onclick: str = "") -> str | None:
     """
@@ -43,20 +49,53 @@ def resolve_link(base_url: str, href: str, onclick: str = "") -> str | None:
     return None
 
 
+def _pick_title(row, anchor) -> str:
+    """
+    행(row) 안에서 실제 '제목'으로 보이는 텍스트를 고른다.
+
+    대부분의 게시판은 <a> 태그 자체가 제목이라 이걸로 충분하지만(예: 보령시,
+    유성구청), 아산시처럼 '고시공고번호'(예: 아산시 공고 제2026-3026호)와
+    '제목'이 서로 다른 칸에 있고 링크는 번호 쪽에 걸려있는 경우가 있다. 이런
+    사이트에서 <a> 태그 텍스트만 쓰면 번호만 저장되고 진짜 제목은 유실된다.
+
+    그래서 <a> 텍스트 하나만 보지 않고, 같은 행의 모든 셀 텍스트를 후보로 모은
+    뒤 '공고/고시 제OOOO호' 형식만 담은 후보는 제외하고, 남은 것 중 가장 긴
+    (=가장 설명적인) 텍스트를 제목으로 고른다. 번호/날짜/담당부서 같은 다른
+    칸은 대개 짧아서 이 방식으로 자연스럽게 걸러진다. <a> 텍스트 자체가 이미
+    진짜 제목인 일반적인 경우에도, 대개 그게 가장 길기 때문에 그대로 선택되어
+    기존 사이트들의 동작은 그대로 유지된다.
+    """
+    candidates = []
+    anchor_text = " ".join(anchor.stripped_strings)
+    if anchor_text:
+        candidates.append(anchor_text)
+    for cell in row.find_all(["td", "li", "div", "span"]):
+        text = " ".join(cell.stripped_strings)
+        if text and text not in candidates:
+            candidates.append(text)
+
+    if not candidates:
+        return ""
+
+    filtered = [c for c in candidates if not _NOTICE_NUMBER_PATTERN.match(c)]
+    pool = filtered or candidates
+    return max(pool, key=len)
+
+
 def extract_row_fields(row, base_url: str, target_date_limit) -> dict | None:
     """
     BeautifulSoup row(tr/li 등)에서 제목/링크/날짜를 추출한다.
     조건(날짜가 target_date_limit 이후)을 만족하지 못하면 None을 반환.
     """
-    title_tag = row.find("a")
-    if not title_tag:
+    anchor = row.find("a")
+    if not anchor:
         return None
 
-    title = " ".join(title_tag.stripped_strings) or title_tag.get_text(strip=True)
+    title = _pick_title(row, anchor)
     if not title:
         return None
 
-    href = title_tag.get("href", "")
+    href = anchor.get("href", "")
     link = resolve_link(base_url, href) or base_url
 
     dates = find_all_dates_in_row(row.stripped_strings)
