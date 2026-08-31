@@ -97,6 +97,12 @@ EXTRA_SITES = [
     {"url": "https://www.igunsul.net/", "org_name": "아이건설넷"},
 ]
 
+# "발주처 선택" 드롭다운에 표시되는 가짜(virtual) 항목. 실제 게시판을 스캔하는 사이트가
+# 아니라 나라장터 Open API(scrapers/api_g2b.py)를 호출하는 것이므로, 등록명부에는
+# 존재하지 않는다. 사용자가 이 항목만 선택하면 사이트 스캔 없이 API만 호출해서
+# 84곳을 다 기다리지 않고 나라장터 결과만 빠르게 확인할 수 있다 (main.py 참고).
+G2B_VIRTUAL_ORG_NAME = "나라장터 (API - 사이트 스캔 없이 바로 조회)"
+
 # 도메인별 전용 처리기(scrapers/custom/*)로 보낼 도메인 매핑.
 # 여기에 등록된 도메인은 requests/일반 selenium을 거치지 않고 바로 전용 핸들러로 간다.
 CUSTOM_HANDLER_DOMAINS = {

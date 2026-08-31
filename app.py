@@ -107,9 +107,10 @@ def get_target_org_list():
         df = pd.read_excel(os.path.join(base_dir, config.INPUT_EXCEL_FILENAME), sheet_name=0)
         orgs = df.iloc[:, config.ORG_NAME_COL_INDEX].dropna().astype(str).unique().tolist()
         orgs.extend([s["org_name"] for s in config.EXTRA_SITES])
+        orgs.append(config.G2B_VIRTUAL_ORG_NAME)
         return sorted(set(orgs))
     except Exception:
-        return [s["org_name"] for s in config.EXTRA_SITES]
+        return [s["org_name"] for s in config.EXTRA_SITES] + [config.G2B_VIRTUAL_ORG_NAME]
 
 
 def render_notice_table(df: pd.DataFrame, key_prefix: str):

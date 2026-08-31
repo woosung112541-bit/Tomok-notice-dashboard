@@ -106,18 +106,32 @@ def main():
         ctx = storage.load_run_context(doc)
 
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        all_sites = site_registry.build_target_sites(base_dir, ctx["url_overrides"], target_orgs)
 
-        if not all_sites:
+        # target_orgs 안에 "나라장터 (API - ...)" 가짜 항목이 섞여 있을 수 있다 (사용자가
+        # 드롭다운에서 나라장터만 빠르게 확인하려고 고른 경우). 이건 실제 게시판이
+        # 아니므로 site_registry에는 넘기지 않고, 대신 나라장터 API를 호출할지 여부를
+        # 결정하는 데만 쓴다.
+        requested_orgs = [] if target_orgs == "ALL" else [o.strip() for o in target_orgs.split(",")]
+        want_g2b = (target_orgs == "ALL") or (config.G2B_VIRTUAL_ORG_NAME in requested_orgs)
+        real_orgs = [o for o in requested_orgs if o != config.G2B_VIRTUAL_ORG_NAME]
+        site_target_orgs = target_orgs if target_orgs == "ALL" else (",".join(real_orgs) if real_orgs else None)
+
+        all_sites = []
+        if site_target_orgs:
+            all_sites = site_registry.build_target_sites(base_dir, ctx["url_overrides"], site_target_orgs)
+
+        if not all_sites and not want_g2b:
             log_info("대상 사이트가 없습니다 (명부 확인 필요).")
             return
 
-        log_info(f"대상 사이트 {len(all_sites)}곳 처리 시작")
-        run_result = engine.run_all_sites(all_sites, target_date_limit, keywords, ctx["history_keys"])
+        run_result = {"all_notices": [], "collected_orgs": set(), "manual_check_items": []}
+        if all_sites:
+            log_info(f"대상 사이트 {len(all_sites)}곳 처리 시작")
+            run_result = engine.run_all_sites(all_sites, target_date_limit, keywords, ctx["history_keys"])
 
         all_notices = run_result["all_notices"]
 
-        if target_orgs == "ALL":
+        if want_g2b:
             g2b_notices = api_g2b.fetch(config.G2B_API_KEY, days_ago)
             all_notices.extend(g2b_notices)
             log_info(f"[나라장터 API] {len(g2b_notices)}건 수집")
