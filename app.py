@@ -333,8 +333,31 @@ if menu == "🔗 발주처 URL 관리":
     st.divider()
     st.subheader(f"📋 현재 등록된 직통 URL 목록 ({len(override_map)}건)")
     if not df_url.empty:
-        st.dataframe(df_url, use_container_width=True, hide_index=True,
-                     column_config={"정확한_게시판_URL": st.column_config.LinkColumn("정확한_게시판_URL")})
+        display_df = df_url.copy()
+        display_df.insert(0, "삭제", False)
+        edited_df = st.data_editor(
+            display_df, use_container_width=True, hide_index=True, key="url_override_editor",
+            column_config={
+                "삭제": st.column_config.CheckboxColumn("삭제", required=True),
+                "정확한_게시판_URL": st.column_config.LinkColumn("정확한_게시판_URL"),
+            },
+            disabled=[c for c in display_df.columns if c != "삭제"],
+        )
+        to_delete = edited_df[edited_df["삭제"]]["발주기관명"].tolist()
+        if to_delete:
+            st.warning(f"선택됨: {', '.join(to_delete)}")
+            if st.button("🗑️ 선택한 항목 삭제", type="primary"):
+                try:
+                    _, doc = storage.connect()
+                    for org in to_delete:
+                        storage.delete_url_override(doc, org)
+                    get_google_sheet.clear()
+                    get_target_org_list.clear()
+                    st.success(f"✅ {len(to_delete)}건 삭제되었습니다.")
+                    time.sleep(1)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"삭제 중 오류: {e}")
     else:
         st.info("아직 등록된 직통 URL이 없습니다.")
 
