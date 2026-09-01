@@ -124,24 +124,28 @@ def main():
             log_info("대상 사이트가 없습니다 (명부 확인 필요).")
             return
 
-        run_result = {"all_notices": [], "collected_orgs": set(), "manual_check_items": []}
+        run_result = {"all_notices": [], "excluded_notices": [], "collected_orgs": set(), "manual_check_items": []}
         if all_sites:
             log_info(f"대상 사이트 {len(all_sites)}곳 처리 시작")
             run_result = engine.run_all_sites(all_sites, target_date_limit, keywords, ctx["history_keys"])
 
         all_notices = run_result["all_notices"]
+        all_excluded = run_result["excluded_notices"]
 
         if want_g2b:
-            g2b_notices = api_g2b.fetch(config.G2B_API_KEY, days_ago)
+            g2b_notices, g2b_excluded = api_g2b.fetch(config.G2B_API_KEY, days_ago)
             all_notices.extend(g2b_notices)
-            log_info(f"[나라장터 API] {len(g2b_notices)}건 수집")
+            all_excluded.extend(g2b_excluded)
+            log_info(f"[나라장터 API] {len(g2b_notices)}건 수집 / {len(g2b_excluded)}건 자동 제외")
 
         added = storage.append_notices(ctx["ws_notices"], all_notices, ctx["history_keys"], current_time)
+        excluded_history_keys = storage.load_excluded_history_keys(doc)
+        added_excluded = storage.append_excluded_notices(doc, all_excluded, excluded_history_keys, current_time)
         storage.append_collected_orgs(ctx["ws_collected"], run_result["collected_orgs"])
         storage.write_manual_check_list(doc, run_result["manual_check_items"])
         storage.write_run_log(doc, RUN_LOG)
 
-        log_info(f"[종료] 신규 공고 {added}건 저장 완료 / "
+        log_info(f"[종료] 신규 공고 {added}건 저장 완료 / 자동 제외 {added_excluded}건 / "
                  f"수동확인 필요 {len(run_result['manual_check_items'])}곳 / "
                  f"경고·오류 로그 {len(RUN_LOG)}건")
     finally:

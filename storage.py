@@ -105,6 +105,34 @@ def append_notices(ws_notices, items: list[dict], history_keys: set, current_tim
     return len(new_rows)
 
 
+def load_excluded_history_keys(doc) -> set:
+    """excluded_notices 탭에 이미 있는 notice_key 집합을 불러온다 (중복 재적재 방지)."""
+    ws = _get_or_create_worksheet(doc, config.SHEET_EXCLUDED_NOTICES,
+                                   ["출처", "등록일", "공고제목", "상세링크", "notice_key", "수집시각", "특이사항", "제외사유"])
+    return {str(r.get("notice_key", "")) for r in ws.get_all_records()}
+
+
+def append_excluded_notices(doc, items: list[dict], history_keys: set, current_time: str) -> int:
+    """제외 키워드에 걸려 별도 분류된 공고를 excluded_notices 탭에 추가한다.
+    "🚫 자동 제외된 공고" 메뉴에서 나중에 훑어볼 수 있도록 완전히 버리지 않고 보관한다."""
+    headers = ["출처", "등록일", "공고제목", "상세링크", "notice_key", "수집시각", "특이사항", "제외사유"]
+    ws = _get_or_create_worksheet(doc, config.SHEET_EXCLUDED_NOTICES, headers)
+    new_rows = []
+    for item in items:
+        notice_key = f"{item['출처']}|||{item['공고제목']}"
+        if notice_key in history_keys:
+            continue
+        matched = [kw for kw in config.EXCLUDE_KEYWORDS if kw in item["공고제목"]]
+        new_rows.append([
+            item["출처"], item["등록일"], item["공고제목"], item["상세링크"],
+            notice_key, current_time, item.get("특이사항", "-"), ", ".join(matched) or "-",
+        ])
+        history_keys.add(notice_key)
+    if new_rows:
+        ws.append_rows(new_rows)
+    return len(new_rows)
+
+
 def append_collected_orgs(ws_collected, org_names: set) -> None:
     if not org_names:
         return
@@ -134,6 +162,27 @@ def write_manual_check_list(doc, manual_items: list[dict]) -> None:
     ws.clear()
     ws.update(range_name="1:1", values=[headers])
     ws.append_rows(rows)
+
+
+# ── 팀 게시판 / 메모장 ("📝 게시판 / 메모장" 메뉴용) ────────────────────────────
+def add_team_note(doc, content: str, author: str = "") -> None:
+    """새 메모를 team_notes 탭에 추가한다. id는 삭제할 때 정확히 그 행만 찾기 위한 값."""
+    headers = ["id", "시각", "작성자", "내용"]
+    ws = _get_or_create_worksheet(doc, config.SHEET_TEAM_NOTES, headers)
+    note_id = str(int(time.time() * 1000))  # 밀리초 타임스탬프 - 같은 팀 규모에서 충돌 걱정 없음
+    now = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+    ws.append_row([note_id, now, author, content])
+
+
+def delete_team_note(doc, note_id: str) -> None:
+    """id로 정확히 그 메모 한 줄만 찾아서 삭제한다."""
+    ws = _get_or_create_worksheet(doc, config.SHEET_TEAM_NOTES, ["id", "시각", "작성자", "내용"])
+    try:
+        cell = ws.find(str(note_id), in_column=1)
+    except gspread.exceptions.CellNotFound:
+        cell = None
+    if cell:
+        ws.delete_rows(cell.row)
 
 
 # ── 발주처 URL 오버라이드 (개별 upsert/삭제 - 대시보드에서 목록으로 관리하기 위함) ──────

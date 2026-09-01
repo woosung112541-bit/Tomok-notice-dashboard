@@ -11,19 +11,20 @@ import time
 from bs4 import BeautifulSoup
 
 import config
-from scrapers.base import extract_row_fields, matches_keywords, deep_scan_notice, select_rows
+from scrapers.base import extract_row_fields, matches_positive_keywords, is_excluded_title, deep_scan_notice, select_rows
 from scrapers.generic_selenium import get_driver
 from utils.logging_setup import log_failure, log_info
 
 LOGIN_URL = "https://www.igunsul.net/login"
 
 
-def scrape(url: str, org_name: str, target_date_limit, keywords: list[str]) -> list[dict]:
+def scrape(url: str, org_name: str, target_date_limit, keywords: list[str]) -> tuple[list[dict], list[dict]]:
     results = []
+    excluded_results = []
 
     if not config.IGUNSUL_ID or not config.IGUNSUL_PW:
         log_failure(org_name, url, "custom_flow", "IGUNSUL_ID/IGUNSUL_PW 시크릿이 설정되지 않음")
-        return results
+        return results, excluded_results
 
     driver = None
     try:
@@ -57,14 +58,21 @@ def scrape(url: str, org_name: str, target_date_limit, keywords: list[str]) -> l
 
         for row in rows:
             fields = extract_row_fields(row, url, target_date_limit)
-            if not fields or not matches_keywords(fields["title"], keywords):
+            if not fields:
+                continue
+            title = fields["title"]
+            if not matches_positive_keywords(title, keywords):
                 continue
             special = deep_scan_notice(fields["link"])
-            results.append({
+            item = {
                 "출처": org_name, "등록일": fields["date_str"],
-                "공고제목": fields["title"], "상세링크": fields["link"],
+                "공고제목": title, "상세링크": fields["link"],
                 "특이사항": special,
-            })
+            }
+            if is_excluded_title(title):
+                excluded_results.append(item)
+            else:
+                results.append(item)
 
     except Exception as e:
         log_failure(org_name, url, "custom_flow", e)
@@ -72,4 +80,4 @@ def scrape(url: str, org_name: str, target_date_limit, keywords: list[str]) -> l
         if driver:
             driver.quit()
 
-    return results
+    return results, excluded_results

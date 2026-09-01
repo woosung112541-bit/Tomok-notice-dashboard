@@ -48,32 +48,34 @@ def _known_hard_reason_for_domain(domain: str) -> str | None:
 
 def process_site(site: dict, target_date_limit, keywords: list[str], history_keys: set) -> dict:
     """사이트 하나를 처리하고 결과 dict를 반환한다.
-    반환 형태: {org_name, base_url, notices, found, manual_required, manual_reason}
+    반환 형태: {org_name, base_url, notices, excluded_notices, found, manual_required, manual_reason}
     """
     org_name, base_url, domain = site["org_name"], site["url"], site["domain"]
 
     if site["handler_type"] == "custom":
         handler_key = _handler_key_for_domain(domain)
         handler_fn = CUSTOM_HANDLERS.get(handler_key)
-        notices = handler_fn(base_url, org_name, target_date_limit, keywords) if handler_fn else []
+        notices, excluded_notices = handler_fn(base_url, org_name, target_date_limit, keywords) if handler_fn else ([], [])
         if not notices:
             reason = _known_hard_reason_for_domain(domain) or "전용 핸들러 실행 결과 0건 (로그 확인 필요)"
             log_manual_required(org_name, base_url, reason)
-            return {"org_name": org_name, "base_url": base_url, "notices": [],
+            return {"org_name": org_name, "base_url": base_url, "notices": [], "excluded_notices": excluded_notices,
                     "found": False, "manual_required": True, "manual_reason": reason}
-        return {"org_name": org_name, "base_url": base_url, "notices": notices,
+        return {"org_name": org_name, "base_url": base_url, "notices": notices, "excluded_notices": excluded_notices,
                 "found": True, "manual_required": False, "manual_reason": ""}
 
     # ── generic: requests 먼저, 추가 게시판 후보(iframe/메뉴링크)도 함께 시도 ────
     candidate_urls = [base_url] + discover_additional_boards(base_url, domain)
     all_notices = []
+    all_excluded = []
     any_rows_found = False
     any_network_error = False
 
     for u in candidate_urls:
-        notices, rows_count, network_error = generic_requests.scrape_board(
+        notices, excluded, rows_count, network_error = generic_requests.scrape_board(
             u, org_name, target_date_limit, keywords, history_keys)
         all_notices.extend(notices)
+        all_excluded.extend(excluded)
         if rows_count > 0:
             any_rows_found = True
         if network_error:
@@ -86,9 +88,10 @@ def process_site(site: dict, target_date_limit, keywords: list[str], history_key
         # 같은 네트워크 경로로 나가는 이상 똑같이 막힐 뿐이라 시간만 낭비한다 (사이트당
         # 수십 초씩 허비 -> 차단된 사이트가 많을 때 전체 실행 시간이 크게 늘어나는 원인이었음).
         for u in candidate_urls:
-            notices, rows_count, network_error = generic_selenium.scrape_board(
+            notices, excluded, rows_count, network_error = generic_selenium.scrape_board(
                 u, org_name, target_date_limit, keywords, history_keys)
             all_notices.extend(notices)
+            all_excluded.extend(excluded)
             if rows_count > 0:
                 any_rows_found = True  # selenium은 게시판을 정상적으로 찾음 (조건에 맞는 공고가 없을 뿐일 수 있음)
             if network_error:
@@ -104,10 +107,10 @@ def process_site(site: dict, target_date_limit, keywords: list[str], history_key
         else:
             reason = "requests·selenium 모두 게시판 행을 찾지 못함 (게시판 구조 확인 필요)"
         log_manual_required(org_name, base_url, reason)
-        return {"org_name": org_name, "base_url": base_url, "notices": [],
+        return {"org_name": org_name, "base_url": base_url, "notices": [], "excluded_notices": all_excluded,
                 "found": False, "manual_required": True, "manual_reason": reason}
 
-    return {"org_name": org_name, "base_url": base_url, "notices": all_notices,
+    return {"org_name": org_name, "base_url": base_url, "notices": all_notices, "excluded_notices": all_excluded,
             "found": len(all_notices) > 0, "manual_required": False, "manual_reason": ""}
 
 
@@ -130,7 +133,7 @@ def run_all_sites(all_sites: list[dict], target_date_limit, keywords: list[str],
     total = len(light_sites) + len(heavy_sites)
     completed = 0
 
-    all_notices, collected_orgs, manual_check_items = [], set(), []
+    all_notices, all_excluded_notices, collected_orgs, manual_check_items = [], [], set(), []
 
     def _handle_result(res: dict):
         nonlocal completed
@@ -141,6 +144,7 @@ def run_all_sites(all_sites: list[dict], target_date_limit, keywords: list[str],
         if res["found"]:
             collected_orgs.add(res["org_name"])
             all_notices.extend(res["notices"])
+        all_excluded_notices.extend(res.get("excluded_notices", []))
         if res["manual_required"]:
             manual_check_items.append({
                 "발주처": res["org_name"], "URL": res["base_url"],
@@ -161,6 +165,7 @@ def run_all_sites(all_sites: list[dict], target_date_limit, keywords: list[str],
 
     return {
         "all_notices": all_notices,
+        "excluded_notices": all_excluded_notices,
         "collected_orgs": collected_orgs,
         "manual_check_items": manual_check_items,
     }

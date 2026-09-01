@@ -110,8 +110,33 @@ def extract_row_fields(row, base_url: str, target_date_limit) -> dict | None:
     }
 
 
-def matches_keywords(title: str, keywords: list[str]) -> bool:
+def is_force_included(title: str) -> bool:
+    """이 핵심 안전점검/진단 키워드가 있으면 EXCLUDE_KEYWORDS에 걸려도 무조건 살려서
+    포함시킨다. 예: '주민등록센터 증축 안전점검 수행기관 모집'은 '주민등록'이 있어
+    제외 대상처럼 보이지만 '안전점검'이 있으므로 반드시 포함해야 한다."""
+    return any(kw in title for kw in config.CORE_SAFETY_KEYWORDS)
+
+
+def is_excluded_title(title: str) -> bool:
+    """제목에 config.EXCLUDE_KEYWORDS 중 하나라도 있으면 True (거의 우리 업무가 아닌 것으로
+    확인된 공고 유형). 단, is_force_included()가 True면 이 판정은 무시된다."""
+    if is_force_included(title):
+        return False
+    return any(kw in title for kw in config.EXCLUDE_KEYWORDS)
+
+
+def matches_positive_keywords(title: str, keywords: list[str]) -> bool:
+    """제외 여부는 따지지 않고, 순수하게 '찾는 키워드'에 맞는지만 본다."""
     return (not keywords) or any(kw in title for kw in keywords)
+
+
+def matches_keywords(title: str, keywords: list[str]) -> bool:
+    """'최종 포함 여부'(제외되지 않고 + 키워드도 맞음)만 알고 싶을 때 쓰는 하위 호환 함수.
+    제외된 공고를 별도로 모아두고 싶은 호출부는 matches_positive_keywords()와
+    is_excluded_title()을 따로 써서 두 경우를 구분해야 한다 (scrapers/generic_*.py 참고)."""
+    if is_excluded_title(title):
+        return False
+    return matches_positive_keywords(title, keywords)
 
 
 def _extract_text_from_attachment(file_url: str, headers: dict) -> str:

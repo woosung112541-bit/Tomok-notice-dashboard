@@ -19,7 +19,7 @@ from urllib.parse import unquote
 
 import requests
 
-from scrapers.base import deep_scan_notice
+from scrapers.base import deep_scan_notice, is_excluded_title
 from utils.logging_setup import log_failure, log_system_note
 
 KST = timezone(timedelta(hours=9))
@@ -40,10 +40,11 @@ ENDPOINTS = [
 ]
 
 
-def fetch(api_key: str, days_ago: int) -> list[dict]:
+def fetch(api_key: str, days_ago: int) -> tuple[list[dict], list[dict]]:
+    """반환: (수집된 공고 리스트, 제외 키워드에 걸려 별도 분류된 공고 리스트)"""
     if not api_key:
         log_failure("나라장터", "-", "config", "G2B_API_KEY 시크릿이 설정되지 않음")
-        return []
+        return [], []
 
     # 공공데이터포털(data.go.kr) 서비스키를 'Encoding' 버전으로 저장해두면,
     # requests가 params로 넘길 때 다시 한 번 URL 인코딩을 해서 '%'가 이중으로 인코딩되고
@@ -56,6 +57,7 @@ def fetch(api_key: str, days_ago: int) -> list[dict]:
     start_dt = (now - timedelta(days=days_ago)).strftime("%Y%m%d0000")
 
     results = []
+    excluded_results = []
     seen = set()
 
     for endpoint in ENDPOINTS:
@@ -104,12 +106,16 @@ def fetch(api_key: str, days_ago: int) -> list[dict]:
             if deep_special != "-":
                 special_parts.append(deep_special)
 
-            results.append({
+            item_row = {
                 "출처": f"{org} (나라장터)",
                 "등록일": item.get("bidNtceDt", "")[:10].replace("-", "."),
                 "공고제목": title,
                 "상세링크": link,
                 "특이사항": " / ".join(special_parts) if special_parts else "-",
-            })
+            }
+            if is_excluded_title(title):
+                excluded_results.append(item_row)
+            else:
+                results.append(item_row)
 
-    return results
+    return results, excluded_results

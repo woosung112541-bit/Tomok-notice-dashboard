@@ -18,7 +18,7 @@ from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
 
 import config
-from scrapers.base import (extract_row_fields, matches_keywords, deep_scan_notice,
+from scrapers.base import (extract_row_fields, matches_positive_keywords, is_excluded_title, deep_scan_notice,
                             select_rows, find_next_page_url, page_has_stop_signal)
 from utils.logging_setup import log_failure, log_info
 
@@ -60,13 +60,14 @@ def get_driver() -> webdriver.Chrome:
 
 
 def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str],
-                  history_keys: set | None = None) -> tuple[list[dict], int, bool]:
+                  history_keys: set | None = None) -> tuple[list[dict], list[dict], int, bool]:
     """
-    반환: (수집된 공고 리스트, 발견된 행 개수, 네트워크_접속_실패_여부)
-    generic_requests.scrape_board()와 동일한 규약(및 페이지네이션 중지 조건)을 따른다.
+    반환: (수집된 공고 리스트, 제외된 공고 리스트, 발견된 행 개수, 네트워크_접속_실패_여부)
+    generic_requests.scrape_board()와 동일한 규약(페이지네이션 중지 조건, 제외 목록 분리)을 따른다.
     """
     history_keys = history_keys or set()
     results = []
+    excluded_results = []
     driver = None
     all_rows = []
     current_url = url
@@ -76,7 +77,7 @@ def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]
         driver = get_driver()
     except Exception as e:
         log_failure(org_name, url, "selenium_load", e)
-        return results, 0, False
+        return results, excluded_results, 0, False
 
     page_num = 0
     for page_num in range(1, config.MAX_PAGINATION_SAFETY_CAP + 1):
@@ -89,13 +90,13 @@ def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]
             if page_num == 1:
                 log_failure(org_name, url, "selenium_load", f"[페이지 로딩 타임아웃 - 네트워크/차단 가능성] {e}")
                 driver.quit()
-                return results, 0, True
+                return results, excluded_results, 0, True
             break
         except Exception as e:
             if page_num == 1:
                 log_failure(org_name, url, "selenium_load", e)
                 driver.quit()
-                return results, 0, False
+                return results, excluded_results, 0, False
             break
 
         all_rows.extend(rows)
@@ -120,14 +121,19 @@ def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]
             continue
         if not fields:
             continue
-        if not matches_keywords(fields["title"], keywords):
+        title = fields["title"]
+        if not matches_positive_keywords(title, keywords):
             continue
         special = deep_scan_notice(fields["link"])
-        results.append({
+        item = {
             "출처": org_name, "등록일": fields["date_str"],
-            "공고제목": fields["title"], "상세링크": fields["link"],
+            "공고제목": title, "상세링크": fields["link"],
             "특이사항": special,
-        })
+        }
+        if is_excluded_title(title):
+            excluded_results.append(item)
+        else:
+            results.append(item)
 
     driver.quit()
-    return results, len(all_rows), False
+    return results, excluded_results, len(all_rows), False

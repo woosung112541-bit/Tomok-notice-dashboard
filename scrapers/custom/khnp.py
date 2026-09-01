@@ -28,7 +28,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
-from scrapers.base import matches_keywords, deep_scan_notice
+from scrapers.base import matches_positive_keywords, is_excluded_title, deep_scan_notice
 from scrapers.generic_selenium import get_driver
 from utils.date_parser import find_earliest_date
 from utils.logging_setup import log_failure, log_info
@@ -82,8 +82,9 @@ def _click_by_text(driver, wait: WebDriverWait, text: str) -> bool:
         return False
 
 
-def scrape(url: str, org_name: str, target_date_limit, keywords: list[str]) -> list[dict]:
+def scrape(url: str, org_name: str, target_date_limit, keywords: list[str]) -> tuple[list[dict], list[dict]]:
     results = []
+    excluded_results = []
     driver = None
     try:
         driver = get_driver()
@@ -94,17 +95,17 @@ def scrape(url: str, org_name: str, target_date_limit, keywords: list[str]) -> l
         _try_close_popups(driver)
 
         if not _click_by_text(driver, wait, MENU_LINK_TEXT):
-            return results
+            return results, excluded_results
         time.sleep(0.5)
         if not _click_by_text(driver, wait, SUBMENU_LINK_TEXT):
-            return results
+            return results, excluded_results
 
         # 목록 grid가 그려질 때까지 대기
         try:
             wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "table tbody tr")))
         except TimeoutException as e:
             log_failure(org_name, driver.current_url, "wait_grid", e)
-            return results
+            return results, excluded_results
 
         rows = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
         log_info(f"[KHNP] 목록 {len(rows)}행 발견")
@@ -122,20 +123,24 @@ def scrape(url: str, org_name: str, target_date_limit, keywords: list[str]) -> l
 
                 # 공고명은 보통 마지막 열에 텍스트로만 존재 (하이퍼링크가 아닐 수 있음) -> 행 전체를 클릭
                 title = row_text.strip().splitlines()[-1] if row_text.strip() else ""
-                if not matches_keywords(title, keywords):
+                if not matches_positive_keywords(title, keywords):
                     continue
 
                 row.click()
                 time.sleep(2)
                 link = driver.current_url
                 special = deep_scan_notice(link) if link != url else "-"
-                results.append({
+                item = {
                     "출처": org_name,
                     "등록일": post_date.strftime("%Y.%m.%d"),
                     "공고제목": title or "(제목 확인 필요)",
                     "상세링크": link,
                     "특이사항": special,
-                })
+                }
+                if is_excluded_title(title):
+                    excluded_results.append(item)
+                else:
+                    results.append(item)
                 driver.back()
                 time.sleep(1.5)
             except Exception as e:
@@ -148,4 +153,4 @@ def scrape(url: str, org_name: str, target_date_limit, keywords: list[str]) -> l
         if driver:
             driver.quit()
 
-    return results
+    return results, excluded_results

@@ -197,7 +197,7 @@ st.sidebar.title("📌 메뉴 선택")
 menu = st.sidebar.radio(
     "이동할 메뉴를 선택하세요:",
     ["공고 자동수집", "🔍 실패 로그 분석", "🔗 발주처 URL 관리",
-     "공고 통계 및 분석", "🎯 타겟 공고 (내 업무)", "📝 게시판 / 메모장"],
+     "공고 통계 및 분석", "🎯 타겟 공고 (내 업무)", "🚫 자동 제외된 공고", "📝 게시판 / 메모장"],
 )
 st.sidebar.divider()
 
@@ -570,7 +570,50 @@ elif menu == "공고 자동수집":
 # ==========================================
 elif menu == "공고 통계 및 분석":
     st.title("📊 공고 통계 및 분석 대시보드")
-    st.write("추후 확장 예정")
+    df = get_google_sheet(config.SHEET_NOTICES)
+    if df.empty:
+        st.info("아직 수집된 데이터가 없습니다.")
+    else:
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("전체 공고 수", f"{len(df):,}건")
+        col2.metric("고유 발주처 수", f"{df['출처'].nunique():,}곳" if "출처" in df.columns else "-")
+        status_counts = df["검토유무"].value_counts() if "검토유무" in df.columns else pd.Series(dtype=int)
+        col3.metric("내 업무 맞음", f"{int(status_counts.get('내업무맞음', 0)):,}건")
+        col4.metric("미검토", f"{int(status_counts.get('미검토', 0)):,}건")
+
+        st.divider()
+
+        c_left, c_right = st.columns(2)
+        with c_left:
+            st.subheader("발주처별 공고 건수 Top 15")
+            if "출처" in df.columns:
+                st.bar_chart(df["출처"].value_counts().head(15))
+        with c_right:
+            st.subheader("검토 상태 분포")
+            if not status_counts.empty:
+                st.bar_chart(status_counts)
+
+        st.subheader("날짜별 공고 등록 추이")
+        if "등록일" in df.columns:
+            dates = pd.to_datetime(df["등록일"], format="%Y.%m.%d", errors="coerce")
+            daily = dates.dt.date.value_counts().dropna().sort_index()
+            if not daily.empty:
+                st.line_chart(daily)
+            else:
+                st.caption("날짜 형식을 인식하지 못해 추이를 그릴 수 없습니다.")
+
+        st.divider()
+        st.subheader("📌 이번 명부 기준 수집 현황 (발주처 단위)")
+        try:
+            collected_df = get_google_sheet(config.SHEET_COLLECTED_ORGS)
+            manual_df = get_google_sheet(config.SHEET_MANUAL_CHECK)
+            c1, c2 = st.columns(2)
+            c1.metric("✅ 정상 수집 발주처 수", f"{len(collected_df):,}곳")
+            c2.metric("🔍 수동확인 필요 발주처 수", f"{len(manual_df):,}곳")
+            if not manual_df.empty and "사유" in manual_df.columns:
+                st.caption("수동확인 사유별 분류는 '🔍 실패 로그 분석' 화면에서 더 자세히 볼 수 있습니다.")
+        except Exception:
+            st.caption("발주처 현황 시트를 아직 불러올 수 없습니다.")
 elif menu == "🎯 타겟 공고 (내 업무)":
     st.title("🎯 수동 분류된 '내 업무' 공고 리스트")
     df = get_google_sheet(config.SHEET_NOTICES)
@@ -578,6 +621,56 @@ elif menu == "🎯 타겟 공고 (내 업무)":
         render_notice_table(df[df["검토유무"] == "내업무맞음"], "target_work")
     else:
         st.info("데이터가 없습니다.")
+elif menu == "🚫 자동 제외된 공고":
+    st.title("🚫 자동 제외된 공고")
+    st.caption(
+        "제목에 업무 무관 키워드(공시송달·무연고·견적제출공고·기간제·분묘개장·주민등록·"
+        "보상계획·수강생·합격자·임용·모니터링)가 있어서 자동으로 걸러진 공고 목록입니다. "
+        "완전히 삭제하지는 않고 여기에 모아두니, 혹시 잘못 걸러진 게 있는지 심심할 때 훑어보세요. "
+        "(단, 이 단어가 있어도 '안전점검' 등 핵심 키워드가 함께 있으면 걸러지지 않고 정상 목록에 들어갑니다.)"
+    )
+    df_excluded = get_google_sheet(config.SHEET_EXCLUDED_NOTICES)
+    if df_excluded.empty:
+        st.info("아직 자동 제외된 공고가 없습니다.")
+    else:
+        display_cols = ["출처", "등록일", "공고제목", "제외사유", "상세링크"]
+        show_df = df_excluded[[c for c in display_cols if c in df_excluded.columns]].iloc[::-1]
+        st.dataframe(
+            show_df, hide_index=True, use_container_width=True,
+            column_config={"상세링크": st.column_config.LinkColumn("상세링크")},
+        )
 elif menu == "📝 게시판 / 메모장":
     st.title("📝 팀 게시판 및 메모장")
-    st.write("추후 확장 예정")
+    st.caption("팀원들과 공유할 메모나 특이사항을 남겨두는 공간입니다. 구글시트에 저장되어 접속하는 모두에게 보입니다.")
+
+    try:
+        _, doc = storage.connect()
+    except storage.SheetUnavailable as e:
+        st.error(f"구글 시트 연결 실패: {e}")
+        doc = None
+
+    if doc is not None:
+        with st.form("new_note_form", clear_on_submit=True):
+            author = st.text_input("작성자 (선택)", placeholder="예: 김담당")
+            content = st.text_area("새 메모", height=100,
+                                    placeholder="예: 이번 주 목요일까지 유성구청 안전점검 건 마감 확인 필요")
+            if st.form_submit_button("✍️ 등록", type="primary") and content.strip():
+                storage.add_team_note(doc, content.strip(), author.strip())
+                get_google_sheet.clear()
+                st.rerun()
+
+        st.divider()
+        notes_df = get_google_sheet(config.SHEET_TEAM_NOTES)
+        if notes_df.empty:
+            st.info("아직 작성된 메모가 없습니다.")
+        else:
+            for _, row in notes_df.iloc[::-1].iterrows():
+                with st.container(border=True):
+                    st.write(row.get("내용", ""))
+                    c1, c2 = st.columns([5, 1])
+                    author_label = row.get("작성자", "") or "익명"
+                    c1.caption(f"{row.get('시각', '')} · {author_label}")
+                    if c2.button("🗑️ 삭제", key=f"del_note_{row.get('id', '')}"):
+                        storage.delete_team_note(doc, row.get("id", ""))
+                        get_google_sheet.clear()
+                        st.rerun()
