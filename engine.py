@@ -20,13 +20,14 @@ import concurrent.futures
 
 import config
 from scrapers import generic_requests, generic_selenium
-from scrapers.custom import khnp, igunsul
+from scrapers.custom import khnp, igunsul, d2b
 from scrapers.base import discover_additional_boards
 from utils.logging_setup import log_info, log_manual_required
 
 CUSTOM_HANDLERS = {
     "khnp": khnp.scrape,
     "igunsul": igunsul.scrape,
+    "d2b": d2b.scrape,
 }
 
 

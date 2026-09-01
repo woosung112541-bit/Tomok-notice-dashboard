@@ -129,6 +129,7 @@ G2B_VIRTUAL_ORG_NAME = "나라장터 (API - 사이트 스캔 없이 바로 조�
 CUSTOM_HANDLER_DOMAINS = {
     "khnp.co.kr": "khnp",
     "igunsul.net": "igunsul",
+    "d2b.go.kr": "d2b",
 }
 
 # 일반 Selenium(3단계)까지는 시도하지만, 그래도 안 되면 '실패 로그 분석'에서 참고용으로
