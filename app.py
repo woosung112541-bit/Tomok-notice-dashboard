@@ -380,7 +380,7 @@ elif menu == "공고 자동수집":
         with col1:
             collect_days = st.number_input("수집 기간 (0입력 시, 당일만 수집)", min_value=0, max_value=365, value=0, step=1)
         with col2:
-            collect_keywords = st.text_input("🔑 수집 키워드 (쉼표 구분)", value="모집, 안전, 공고")
+            collect_keywords = st.text_input("🔑 수집 키워드 (쉼표 구분)", value=", ".join(config.DEFAULT_KEYWORDS))
 
         st.divider()
         st.subheader("🎯 타겟 발주처 설정")
