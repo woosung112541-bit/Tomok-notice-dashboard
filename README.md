@@ -320,6 +320,24 @@ GitHub Actions에서 실행 중 '취소(Cancel)'를 누르면 프로세스가 �
 지금 당장은 무료 프록시 토글을 켜서 얼마나 도움이 되는지 몇 번 지켜보고,
 대전처럼 중요도가 높은 지역만 셀프호스팅 러너로 확실히 잡는 조합을 권장한다.
 
+## 리퍼러(Referer) 없이 직접 접속하면 막는 사이트 대응
+
+세종도시교통공사 실제 테스트에서 발견: 주소를 직접 열면(주소창에 쳐서 들어가거나
+우리 스크래퍼가 바로 요청하면) "처리 중 오류가 발생하였습니다" 안내 페이지로
+돌려보내고, 자기 사이트 안에서 메뉴를 눌러 넘어온 경우에만 실제 내용을 보여주는
+사이트가 있다 - 주소 자체는 맞는데 "들어간 경로"가 이상하다고 판단해서 막는
+전형적인 Referer 체크였다.
+
+`config.get_request_headers(url)`을 새로 만들어서, 요청을 보낼 때마다 그 사이트
+자신의 루트 주소(예: `https://www.sctc.kr/`)를 Referer로 채워 보내도록 했다 -
+"이 사이트 홈페이지에서 자연스럽게 넘어온 것처럼" 위장하는 셈이다. `requests`
+기반 경로(`scrapers/base.py`, `scrapers/generic_requests.py`)뿐 아니라 Selenium
+경로(`scrapers/generic_selenium.py`)에도 적용했는데, Selenium은 일반
+`driver.get()`으로는 Referer를 지정할 수 없어서 Chrome DevTools Protocol의
+`Page.navigate`를 대신 사용했다(`_navigate_with_referer`, CDP 실패 시 기존
+`driver.get()`으로 안전하게 대체됨). 이건 세종교통공사만이 아니라 비슷한 방식의
+Referer 체크를 쓰는 다른 사이트에도 도움이 될 수 있는 공통 개선이다.
+
 ## 그 외 알려진 이슈 / 참고사항
 
 - **KHNP 셀렉터 검증 필요**: `scrapers/custom/khnp.py`는 화면 캡처 기반 추정으로

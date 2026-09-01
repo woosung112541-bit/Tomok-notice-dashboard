@@ -34,7 +34,7 @@ def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]
     만날 때까지 계속 다음 페이지로 넘어간다(page_has_stop_signal 참고).
     """
     history_keys = history_keys or set()
-    headers = config.REQUEST_HEADERS
+    headers = config.get_request_headers(url)
     results = []
     excluded_results = []
     all_rows = []

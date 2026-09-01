@@ -59,6 +59,19 @@ def get_driver() -> webdriver.Chrome:
     return driver
 
 
+def _navigate_with_referer(driver, url: str) -> None:
+    """일부 사이트(예: 세종도시교통공사)는 주소창에 직접 쳐서 들어가면 '처리 중
+    오류' 안내 페이지로 돌려보내고, 자기 사이트 안에서 메뉴를 눌러 넘어온
+    경우에만 실제 내용을 보여주는 리퍼러 체크를 한다. 일반 driver.get()은
+    리퍼러가 비어있어서 이런 체크에 걸린다 - Chrome DevTools Protocol로 그
+    사이트 자신의 루트 주소를 리퍼러로 채워서 이동하면 대부분 통과한다."""
+    try:
+        referer = config.get_request_headers(url)["Referer"]
+        driver.execute_cdp_cmd("Page.navigate", {"url": url, "referrer": referer})
+    except Exception:
+        driver.get(url)
+
+
 def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str],
                   history_keys: set | None = None) -> tuple[list[dict], list[dict], int, bool]:
     """
@@ -82,7 +95,7 @@ def scrape_board(url: str, org_name: str, target_date_limit, keywords: list[str]
     page_num = 0
     for page_num in range(1, config.MAX_PAGINATION_SAFETY_CAP + 1):
         try:
-            driver.get(current_url)
+            _navigate_with_referer(driver, current_url)
             driver.implicitly_wait(2)
             soup = BeautifulSoup(driver.page_source, "html.parser")
             rows = select_rows(soup)

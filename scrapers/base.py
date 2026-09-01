@@ -169,7 +169,7 @@ def _extract_text_from_attachment(file_url: str, headers: dict) -> str:
 
 def deep_scan_notice(url: str) -> str:
     """상세 페이지 + 첨부파일까지 열어 PLUS/MINUS/지역제한 키워드를 태깅해서 문자열로 반환."""
-    headers = config.REQUEST_HEADERS
+    headers = config.get_request_headers(url)
     full_text = ""
     try:
         res = requests.get(url, headers=headers, verify=False, timeout=config.get_request_timeout_tuple())
@@ -214,7 +214,7 @@ def discover_additional_boards(base_url: str, domain: str) -> list[str]:
     discovered_iframes = set()
     discovered_menu_links = set()
     try:
-        res = requests.get(base_url, headers=config.REQUEST_HEADERS, verify=False, timeout=config.get_request_timeout_tuple())
+        res = requests.get(base_url, headers=config.get_request_headers(base_url), verify=False, timeout=config.get_request_timeout_tuple())
         soup = BeautifulSoup(res.text, "html.parser")
 
         for iframe in soup.find_all("iframe", src=True):

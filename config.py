@@ -20,6 +20,7 @@ config.py
 """
 
 import os
+import urllib.parse
 
 try:
     import streamlit as st
@@ -200,3 +201,18 @@ REQUEST_HEADERS = {
                   "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
     "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
 }
+
+
+def get_request_headers(url: str) -> dict:
+    """URL별로 '그 사이트 홈페이지에서 자연스럽게 넘어온 것처럼' Referer를 붙여서
+    반환한다. 일부 사이트(예: 세종도시교통공사)는 주소를 직접 쳐서 들어가면
+    '처리 중 오류가 발생하였습니다' 같은 안내 페이지로 돌려보내고, 자기 사이트
+    안에서 메뉴를 눌러 넘어온 경우에만 실제 내용을 보여주는 리퍼러 체크를 한다.
+    Referer를 그 사이트 자신의 루트 주소로 채워서 보내면, 이런 단순 체크는
+    대부분 통과한다 (서버가 별도 세션 상태까지 검사하는 아주 엄격한 경우는 예외)."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+        referer = f"{parsed.scheme}://{parsed.netloc}/"
+    except Exception:
+        referer = url
+    return {**REQUEST_HEADERS, "Referer": referer}
