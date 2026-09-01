@@ -120,17 +120,36 @@ def _render_stuck_lock_warning(doc, key_suffix: str):
             st.rerun()
 
 
-@st.cache_data
+@st.cache_data(ttl=300)
 def get_target_org_list():
+    orgs = set()
+
+    # 1) 등록명부 엑셀
     try:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         df = pd.read_excel(os.path.join(base_dir, config.INPUT_EXCEL_FILENAME), sheet_name=0)
-        orgs = df.iloc[:, config.ORG_NAME_COL_INDEX].dropna().astype(str).unique().tolist()
-        orgs.extend([s["org_name"] for s in config.EXTRA_SITES])
-        orgs.append(config.G2B_VIRTUAL_ORG_NAME)
-        return sorted(set(orgs))
+        orgs.update(df.iloc[:, config.ORG_NAME_COL_INDEX].dropna().astype(str).unique().tolist())
     except Exception:
-        return [s["org_name"] for s in config.EXTRA_SITES] + [config.G2B_VIRTUAL_ORG_NAME]
+        pass
+
+    # 2) 코드에 항상 포함되는 사이트 (한국시설안전협회 등)
+    orgs.update(s["org_name"] for s in config.EXTRA_SITES)
+
+    # 3) "➕ 새 발주처 추가"로 등록한 곳들 - url_overrides 시트에는 저장되는데
+    # 이 드롭다운은 엑셀만 보고 있어서 여기 추가한 게 하나도 안 뜨는 버그가 있었다.
+    # 이제 이 시트도 함께 읽어서 합친다.
+    try:
+        _, doc = storage.connect()
+        ws = doc.worksheet(config.SHEET_URL_OVERRIDES)
+        for r in ws.get_all_records():
+            name = str(r.get("발주기관명", "")).strip()
+            if name:
+                orgs.add(name)
+    except Exception:
+        pass
+
+    orgs.add(config.G2B_VIRTUAL_ORG_NAME)
+    return sorted(orgs)
 
 
 def render_notice_table(df: pd.DataFrame, key_prefix: str):
@@ -266,6 +285,7 @@ if menu == "🔗 발주처 URL 관리":
                         _, doc = storage.connect()
                         storage.upsert_url_override(doc, picked_org, new_url, new_note)
                         get_google_sheet.clear()
+                        get_target_org_list.clear()
                         st.success(f"✅ '{picked_org}' 직통 URL이 저장되었습니다.")
                         time.sleep(1)
                         st.rerun()
@@ -277,6 +297,7 @@ if menu == "🔗 발주처 URL 관리":
                     _, doc = storage.connect()
                     storage.delete_url_override(doc, picked_org)
                     get_google_sheet.clear()
+                    get_target_org_list.clear()
                     st.success(f"✅ '{picked_org}' 오버라이드가 삭제되었습니다. 명부 기본 URL로 되돌아갑니다.")
                     time.sleep(1)
                     st.rerun()
@@ -301,6 +322,7 @@ if menu == "🔗 발주처 URL 관리":
                     _, doc = storage.connect()
                     storage.upsert_url_override(doc, new_org_name.strip(), new_org_url.strip(), new_org_note)
                     get_google_sheet.clear()
+                    get_target_org_list.clear()
                     st.success(f"✅ 새 발주처 '{new_org_name}'가 추가되었습니다.")
                     time.sleep(1)
                     st.rerun()
