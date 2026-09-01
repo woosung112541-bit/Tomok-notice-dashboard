@@ -185,6 +185,32 @@ def delete_team_note(doc, note_id: str) -> None:
         ws.delete_rows(cell.row)
 
 
+# ── "🗒️ 전수조사 로그 (AI 분석용)" - 성공/실패 관계없이 실행 전체를 기록 ─────────────
+def write_site_results(doc, run_id: str, run_time: str, site_results: list[dict]) -> None:
+    """이번 실행에서 처리한 사이트마다 한 줄씩(성공/실패 관계없이 전부) 남긴다.
+    run_log(=실패 로그)와 달리, 성공한 사이트도 다 남는다는 게 핵심 차이점이다."""
+    if not site_results:
+        return
+    headers = ["실행ID", "시각", "발주처", "URL", "처리방식", "결과", "수집건수", "제외건수", "소요시간(초)", "사유"]
+    ws = _get_or_create_worksheet(doc, config.SHEET_SITE_RESULTS, headers)
+    rows = [[run_id, run_time, r.get("발주처", ""), r.get("URL", ""), r.get("처리방식", ""),
+             r.get("결과", ""), r.get("수집건수", 0), r.get("제외건수", 0),
+             r.get("소요시간(초)", ""), r.get("사유", "")] for r in site_results]
+    ws.append_rows(rows)
+
+
+def write_run_summary(doc, summary: dict) -> None:
+    """실행 1회당 요약 정보를 한 줄 남긴다 (AI에게 통째로 넣기 좋도록 한 화면에
+    실행 전체 그림이 다 들어가게 설계함)."""
+    headers = [
+        "실행ID", "시작시각", "종료시각", "총소요시간(초)", "실행위치",
+        "수집기간(일)", "키워드", "대상발주처", "프록시사용",
+        "전체사이트수", "성공수", "실패_수동확인수", "신규공고수", "자동제외수",
+    ]
+    ws = _get_or_create_worksheet(doc, config.SHEET_RUN_SUMMARY, headers)
+    ws.append_row([summary.get(h, "") for h in headers])
+
+
 # ── 발주처 URL 오버라이드 (개별 upsert/삭제 - 대시보드에서 목록으로 관리하기 위함) ──────
 def upsert_url_override(doc, org_name: str, url: str, note: str = "") -> None:
     """특정 발주처의 직통 URL을 등록/수정한다. 이미 있으면 그 행만 갱신, 없으면 새로 추가."""

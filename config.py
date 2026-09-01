@@ -68,6 +68,8 @@ SHEET_RUN_LOG = "run_log"          # 신규: 실행 로그(실패 사유 포함)
 SHEET_MANUAL_CHECK = "manual_check"  # 신규: 자동 수집이 불가능하다고 판단된 발주처 목록
 SHEET_TEAM_NOTES = "team_notes"    # 신규: "게시판/메모장" 메뉴용 팀 공유 메모
 SHEET_EXCLUDED_NOTICES = "excluded_notices"  # 신규: 제외 키워드에 걸려 자동 분류된 공고 목록
+SHEET_SITE_RESULTS = "site_results"  # 신규: "AI 전수조사 로그" - 성공/실패 관계없이 사이트별 결과
+SHEET_RUN_SUMMARY = "run_summary"    # 신규: "AI 전수조사 로그" - 실행 1회당 요약 1줄
 
 # ── 입력 명부 엑셀 ───────────────────────────────────────────────────────────
 INPUT_EXCEL_FILENAME = "등록명부 정리시트.xlsx"

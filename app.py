@@ -216,7 +216,8 @@ st.sidebar.title("📌 메뉴 선택")
 menu = st.sidebar.radio(
     "이동할 메뉴를 선택하세요:",
     ["공고 자동수집", "🔍 실패 로그 분석", "🔗 발주처 URL 관리",
-     "공고 통계 및 분석", "🎯 타겟 공고 (내 업무)", "🚫 자동 제외된 공고", "📝 게시판 / 메모장"],
+     "공고 통계 및 분석", "🎯 타겟 공고 (내 업무)", "🚫 자동 제외된 공고",
+     "🗒️ 전수조사 로그 (AI 분석용)", "📝 게시판 / 메모장"],
 )
 st.sidebar.divider()
 
@@ -661,6 +662,60 @@ elif menu == "🚫 자동 제외된 공고":
             show_df, hide_index=True, use_container_width=True,
             column_config={"상세링크": st.column_config.LinkColumn("상세링크")},
         )
+elif menu == "🗒️ 전수조사 로그 (AI 분석용)":
+    st.title("🗒️ 전수조사 로그 (AI 분석용)")
+    st.caption(
+        "성공/실패 관계없이 이번 실행에서 처리한 사이트 전체를 한 줄씩 기록합니다. "
+        "'🔍 실패 로그 분석'에는 실패한 것만 남지만, 여기는 성공한 것까지 다 남아서 "
+        "'전체 중 정확히 몇 곳이 어떤 방식으로 됐는지' 전체 그림을 볼 수 있습니다. "
+        "맨 아래 텍스트를 통째로 복사해서 AI에게 붙여넣으면 바로 분석을 부탁할 수 있어요."
+    )
+
+    df_summary = get_google_sheet(config.SHEET_RUN_SUMMARY)
+    df_sites = get_google_sheet(config.SHEET_SITE_RESULTS)
+
+    if df_summary.empty or "실행ID" not in df_summary.columns:
+        st.info("아직 기록된 실행이 없습니다. 공고 수집을 한 번 실행한 뒤 다시 확인해주세요.")
+    else:
+        run_options = df_summary["실행ID"].iloc[::-1].tolist()
+        picked_run = st.selectbox("확인할 실행을 고르세요 (최신 실행이 맨 위):", run_options)
+
+        run_summary_row = df_summary[df_summary["실행ID"] == picked_run].iloc[-1]
+        if not df_sites.empty and "실행ID" in df_sites.columns:
+            run_sites = df_sites[df_sites["실행ID"] == picked_run]
+        else:
+            run_sites = df_sites.iloc[0:0]
+
+        st.subheader("📌 실행 요약")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("실행위치", run_summary_row.get("실행위치", "-"))
+        c2.metric("총 소요시간", f"{run_summary_row.get('총소요시간(초)', '-')}초")
+        c3.metric("성공", f"{run_summary_row.get('성공수', 0)}곳")
+        c4.metric("실패/수동확인", f"{run_summary_row.get('실패_수동확인수', 0)}곳")
+        st.dataframe(run_summary_row.to_frame().T, hide_index=True, use_container_width=True)
+
+        st.subheader(f"📋 사이트별 결과 ({len(run_sites)}건)")
+        if run_sites.empty:
+            st.info("이 실행에 대한 사이트별 결과가 없습니다 (나라장터/방위사업청만 단독 실행한 경우일 수 있습니다).")
+        else:
+            st.dataframe(run_sites, hide_index=True, use_container_width=True)
+
+        st.divider()
+        st.subheader("📋 AI에게 그대로 붙여넣을 텍스트")
+        lines = [f"=== 실행 요약 (ID: {picked_run}) ==="]
+        for col in df_summary.columns:
+            lines.append(f"{col}: {run_summary_row.get(col, '')}")
+        lines.append("")
+        lines.append(f"=== 사이트별 결과 ({len(run_sites)}건) ===")
+        for _, row in run_sites.iterrows():
+            line = (f"[{row.get('결과', '')}] {row.get('발주처', '')} | 방식:{row.get('처리방식', '')} | "
+                    f"수집:{row.get('수집건수', '')}건 | 제외:{row.get('제외건수', '')}건 | "
+                    f"{row.get('소요시간(초)', '')}초")
+            if str(row.get("사유", "")).strip():
+                line += f" | 사유: {row.get('사유', '')}"
+            lines.append(line)
+        st.code("\n".join(lines), language=None)
+
 elif menu == "📝 게시판 / 메모장":
     st.title("📝 팀 게시판 및 메모장")
     st.caption("팀원들과 공유할 메모나 특이사항을 남겨두는 공간입니다. 구글시트에 저장되어 접속하는 모두에게 보입니다.")

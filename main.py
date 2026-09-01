@@ -18,6 +18,8 @@ site_registry.py + engine.py가 자동으로 결정하므로, 더 이상 사람�
 
 import os
 import sys
+import time
+import uuid
 import warnings
 from datetime import datetime, timedelta, timezone
 
@@ -59,6 +61,12 @@ def parse_args():
 
 
 def main():
+    run_start_time = time.time()
+    run_id = datetime.now(KST).strftime("%Y%m%d_%H%M%S_") + uuid.uuid4().hex[:6]
+    # GitHub Actions는 항상 GITHUB_ACTIONS=true 환경변수를 심어준다 - 이걸로
+    # "클라우드(Streamlit)"에서 돌았는지 "사무실 PC(GitHub Actions)"에서 돌았는지 구분한다.
+    run_location = "사무실 PC(GitHub Actions)" if os.environ.get("GITHUB_ACTIONS") == "true" else "클라우드(Streamlit)"
+
     days_ago, keywords, target_orgs, use_proxy = parse_args()
 
     if use_proxy:
@@ -145,9 +153,35 @@ def main():
         storage.write_manual_check_list(doc, run_result["manual_check_items"])
         storage.write_run_log(doc, RUN_LOG)
 
+        # "🗒️ 전수조사 로그 (AI 분석용)" - 성공/실패 관계없이 이번 실행 전체를 기록한다.
+        # run_log(실패 로그)에는 성공한 사이트가 하나도 안 남아서, "84곳 중 정확히
+        # 몇 곳이 어떤 방식으로 성공/실패했는지" 전체 그림을 볼 방법이 없었다.
+        site_results = run_result.get("site_results", [])
+        storage.write_site_results(doc, run_id, current_time, site_results)
+
+        success_count = sum(1 for r in site_results if r["결과"].startswith("성공"))
+        fail_count = sum(1 for r in site_results if r["결과"].startswith("실패"))
+        total_elapsed = round(time.time() - run_start_time, 1)
+        storage.write_run_summary(doc, {
+            "실행ID": run_id,
+            "시작시각": current_time,
+            "종료시각": datetime.now(KST).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S"),
+            "총소요시간(초)": total_elapsed,
+            "실행위치": run_location,
+            "수집기간(일)": days_ago,
+            "키워드": ", ".join(keywords),
+            "대상발주처": target_orgs,
+            "프록시사용": "예" if use_proxy else "아니오",
+            "전체사이트수": len(site_results),
+            "성공수": success_count,
+            "실패_수동확인수": fail_count,
+            "신규공고수": added,
+            "자동제외수": added_excluded,
+        })
+
         log_info(f"[종료] 신규 공고 {added}건 저장 완료 / 자동 제외 {added_excluded}건 / "
                  f"수동확인 필요 {len(run_result['manual_check_items'])}곳 / "
-                 f"경고·오류 로그 {len(RUN_LOG)}건")
+                 f"경고·오류 로그 {len(RUN_LOG)}건 / 총 소요시간 {total_elapsed}초")
     finally:
         storage.manage_sheet_lock(doc, "unlock")
 
