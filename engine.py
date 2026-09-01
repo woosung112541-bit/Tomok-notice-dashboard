@@ -116,9 +116,9 @@ def process_site(site: dict, target_date_limit, keywords: list[str], history_key
         if any_network_error:
             reason = ("서버 접속 자체가 시간 초과됨 - 이 사이트가 현재 실행 위치(클라우드 IP)의 "
                        "접속을 막고 있을 가능성이 높음 (셀렉터 문제가 아님, 국내 IP 경유가 필요할 수 있음)")
-        elif config.G2B_MIGRATION_HINT in org_name:
-            reason = ("이 발주처는 명부에 '조달청 이관' 표시가 있어 자체 게시판에 공고가 없을 수 있음 "
-                       "(나라장터 API로 별도 수집되고 있으니 실제 문제가 아닐 가능성이 높음)")
+        elif config.G2B_MIGRATION_HINT in org_name or org_name in config.KNOWN_G2B_REDIRECT_ORGS:
+            reason = ("이 발주처는 자체 게시판에 공고가 없고 나라장터로 이관/연결된 것으로 확인됨 "
+                       "(나라장터 API로 별도 수집되고 있으니 실제 문제가 아님)")
         else:
             reason = "requests·selenium 모두 게시판 행을 찾지 못함 (게시판 구조 확인 필요)"
         log_manual_required(org_name, base_url, reason)
