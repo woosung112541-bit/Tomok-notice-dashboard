@@ -225,6 +225,7 @@ st.sidebar.subheader("🔗 주요 사이트 바로가기")
 for site in config.EXTRA_SITES:
     st.sidebar.link_button(site["org_name"], site["url"])
 st.sidebar.link_button("🛒 나라장터", "https://www.g2b.go.kr/index.jsp")
+st.sidebar.link_button("🏢 대전 동구청 고시공고", "https://www.donggu.go.kr/dg/kor/contents/916")
 for domain, info in config.KNOWN_HARD_SITES.items():
     st.sidebar.link_button(f"💧 {info['label']}", info["url"])
 
@@ -304,6 +305,32 @@ if menu == "🔗 발주처 URL 관리":
                     st.rerun()
                 except Exception as e:
                     st.error(f"삭제 중 오류: {e}")
+
+        st.divider()
+        st.caption("URL을 저장하신 다음, 여기서 바로 이 발주처 하나만 빠르게 테스트해볼 수 있습니다 (다른 메뉴로 이동할 필요 없음).")
+        if st.button("🧪 지금 바로 이 발주처만 테스트", use_container_width=True):
+            with st.status(f"🧪 '{picked_org}' 테스트 중...", expanded=True) as status:
+                try:
+                    process = subprocess.Popen(
+                        [sys.executable, "-u", "main.py", "60", ", ".join(config.DEFAULT_KEYWORDS), picked_org, "0"],
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                        encoding="utf-8", bufsize=1,
+                    )
+                    for raw_line in iter(process.stdout.readline, ""):
+                        if not raw_line:
+                            continue
+                        line = raw_line.strip()
+                        if not line.startswith("PROGRESS:"):
+                            st.write(line)
+                    process.wait()
+                    if process.returncode == 0:
+                        status.update(label=f"✅ '{picked_org}' 테스트 완료 (위 로그에서 결과 확인)", state="complete")
+                        get_google_sheet.clear()
+                    else:
+                        status.update(label="❌ 테스트 실패 (로그 확인)", state="error")
+                except Exception as e:
+                    status.update(label=f"❌ 시스템 오류: {e}", state="error")
+            st.caption("(수집 기간 60일, 기본 키워드로 자동 테스트했습니다 - 나머지 설정은 '공고 자동수집' 화면에서 조정할 수 있습니다.)")
 
     # ── 탭 2: 명부에 아예 없는 새 발주처를 추가 (코드/엑셀 수정 없이 바로 수집 대상에 포함됨) ──
     with tab_add:

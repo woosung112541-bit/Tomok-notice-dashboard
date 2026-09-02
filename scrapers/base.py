@@ -37,6 +37,13 @@ except ImportError:
 # 잘못 저장되고 있었다 (실제 제목은 옆 칸의 일반 텍스트였음).
 _NOTICE_NUMBER_PATTERN = re.compile(r'^[가-힣0-9\s]{0,20}(공고|고시)\s*제?\s*[\d\-]+\s*호$')
 
+# "2026-08-21", "2026-08-21 ~ 2026-09-18", "2026.08.21" 처럼 날짜(또는 날짜 범위)
+# 뿐인 텍스트를 가려내기 위한 패턴. 대전 동구청처럼 '게재기간'(예: "2026-08-21 ~
+# 2026-09-18") 컬럼이 있는 게시판에서, 이 날짜 범위 텍스트가 우연히 진짜 제목보다
+# 길어지면 _pick_title()이 날짜를 제목으로 잘못 골라버릴 수 있다. 번호 패턴과
+# 마찬가지로 후보에서 아예 제외한다.
+_DATE_ONLY_PATTERN = re.compile(r'^[\d.\-/년월일\s]+(~|-)?\s*[\d.\-/년월일\s]*$')
+
 
 def resolve_link(base_url: str, href: str, onclick: str = "") -> str | None:
     """
@@ -78,7 +85,8 @@ def _pick_title(row, anchor=None) -> str:
     if not candidates:
         return ""
 
-    filtered = [c for c in candidates if not _NOTICE_NUMBER_PATTERN.match(c)]
+    filtered = [c for c in candidates
+                if not _NOTICE_NUMBER_PATTERN.match(c) and not _DATE_ONLY_PATTERN.match(c)]
     pool = filtered or candidates
     return max(pool, key=len)
 
