@@ -49,7 +49,7 @@ def resolve_link(base_url: str, href: str, onclick: str = "") -> str | None:
     return None
 
 
-def _pick_title(row, anchor) -> str:
+def _pick_title(row, anchor=None) -> str:
     """
     행(row) 안에서 실제 '제목'으로 보이는 텍스트를 고른다.
 
@@ -66,9 +66,10 @@ def _pick_title(row, anchor) -> str:
     기존 사이트들의 동작은 그대로 유지된다.
     """
     candidates = []
-    anchor_text = " ".join(anchor.stripped_strings)
-    if anchor_text:
-        candidates.append(anchor_text)
+    if anchor is not None:
+        anchor_text = " ".join(anchor.stripped_strings)
+        if anchor_text:
+            candidates.append(anchor_text)
     for cell in row.find_all(["td", "li", "div", "span"]):
         text = " ".join(cell.stripped_strings)
         if text and text not in candidates:
@@ -86,17 +87,23 @@ def extract_row_fields(row, base_url: str, target_date_limit) -> dict | None:
     """
     BeautifulSoup row(tr/li 등)에서 제목/링크/날짜를 추출한다.
     조건(날짜가 target_date_limit 이후)을 만족하지 못하면 None을 반환.
+
+    <a> 태그가 없는 행(예: 대전 동구청처럼 <tr onclick="...">로 자바스크립트
+    상세보기를 여는 방식, <a href> 자체가 없는 구조)도 지원한다 - 이런 경우
+    제목은 그대로 셀 텍스트에서 뽑고, 상세 링크만 게시판 목록 주소 자체로
+    대체한다 (개별 공고로 바로 가는 주소를 알 수 없기 때문).
     """
     anchor = row.find("a")
-    if not anchor:
-        return None
 
     title = _pick_title(row, anchor)
     if not title:
         return None
 
-    href = anchor.get("href", "")
-    link = resolve_link(base_url, href) or base_url
+    if anchor is not None:
+        href = anchor.get("href", "")
+        link = resolve_link(base_url, href) or base_url
+    else:
+        link = base_url
 
     dates = find_all_dates_in_row(row.stripped_strings)
     post_date = min(dates) if dates else None
