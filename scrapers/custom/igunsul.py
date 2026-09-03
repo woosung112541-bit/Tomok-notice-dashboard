@@ -4,10 +4,24 @@ scrapers/custom/igunsul.py
 아이건설넷(igunsul.net) 전용 핸들러 - 로그인 후 게시판 조회.
 로그인 계정은 절대 코드에 적지 않고 config.IGUNSUL_ID / config.IGUNSUL_PW
 (Streamlit secrets / GitHub Actions secrets)에서 읽어온다.
+
+실제 화면 확인 결과: 첫 화면에 "아이디 로그인" / "공동인증서 로그인" 두 탭이 있고,
+"아이디 로그인" 탭이 기본으로 열려있다. 예전 코드는 "페이지에서 처음 보이는
+텍스트 입력칸"을 무작정 골랐는데, 화면 맨 위에 "공고명을 검색하세요"라는
+검색창도 똑같이 text 타입 입력칸이라서, 로그인 아이디 칸이 아니라 그 검색창에
+아이디를 입력하고 있었을 가능성이 높다 (그래서 로그인이 계속 조용히 실패했음).
+
+이제 placeholder 텍스트("아이디 입력", "비밀번호 입력")로 정확한 칸을 콕 집어서
+채우고, "로그인" 버튼을 텍스트로 정확히 찾아서 클릭한다 (엉뚱한 첫 번째 <form>을
+제출하지 않는다).
 """
 
 import time
 
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from bs4 import BeautifulSoup
 
 import config
@@ -15,7 +29,23 @@ from scrapers.base import extract_row_fields, matches_positive_keywords, is_excl
 from scrapers.generic_selenium import get_driver
 from utils.logging_setup import log_failure, log_info
 
-LOGIN_URL = "https://www.igunsul.net/login"
+LOGIN_URL = "https://www.igunsul.net/"
+
+# 실제 화면에서 확인한 입력칸의 placeholder 텍스트. 여러 후보를 순서대로 시도한다
+# (사이트가 문구를 조금 바꿔도 웬만하면 걸리도록).
+ID_FIELD_SELECTORS = ["input[placeholder*='아이디 입력']", "input[placeholder*='아이디']"]
+PW_FIELD_SELECTORS = ["input[placeholder*='비밀번호 입력']", "input[type='password']"]
+
+
+def _find_first(driver, selectors):
+    for sel in selectors:
+        try:
+            el = driver.find_element(By.CSS_SELECTOR, sel)
+            if el:
+                return el
+        except NoSuchElementException:
+            continue
+    return None
 
 
 def scrape(url: str, org_name: str, target_date_limit, keywords: list[str]) -> tuple[list[dict], list[dict]]:
@@ -30,21 +60,38 @@ def scrape(url: str, org_name: str, target_date_limit, keywords: list[str]) -> t
     try:
         driver = get_driver()
         driver.get(LOGIN_URL)
-        time.sleep(2)
-        try:
-            driver.execute_script(
-                "document.querySelector('input[type=\"text\"], input[name*=\"id\"]').value=arguments[0];",
-                config.IGUNSUL_ID,
-            )
-            driver.execute_script(
-                "document.querySelector('input[type=\"password\"], input[name*=\"pw\"]').value=arguments[0];",
-                config.IGUNSUL_PW,
-            )
-            driver.execute_script("document.querySelector('form').submit();")
+        wait = WebDriverWait(driver, 10)
+
+        id_field = _find_first(driver, ID_FIELD_SELECTORS)
+        pw_field = _find_first(driver, PW_FIELD_SELECTORS)
+
+        if not id_field or not pw_field:
+            log_failure(org_name, LOGIN_URL, "login",
+                        f"로그인 입력칸을 못 찾음 (id_field={bool(id_field)}, pw_field={bool(pw_field)})")
+        else:
+            id_field.clear()
+            id_field.send_keys(config.IGUNSUL_ID)
+            pw_field.clear()
+            pw_field.send_keys(config.IGUNSUL_PW)
+
+            # "로그인" 이라는 텍스트를 가진 버튼/링크를 정확히 찾아서 클릭한다
+            # (첫 번째 <form>을 통째로 제출하면 엉뚱한 폼일 수 있어서 이 방식이 더 안전함).
+            login_btn = None
+            for tag in ["button", "a", "input"]:
+                try:
+                    candidates = driver.find_elements(By.XPATH, f"//{tag}[contains(text(), '로그인')]")
+                    if candidates:
+                        login_btn = candidates[0]
+                        break
+                except Exception:
+                    continue
+            if login_btn:
+                login_btn.click()
+            else:
+                pw_field.submit()  # 버튼을 못 찾으면 폼 자체 제출 시도 (최후 수단)
+
             time.sleep(2)
-            log_info("[아이건설넷] 로그인 시도 완료")
-        except Exception as e:
-            log_failure(org_name, LOGIN_URL, "login", e)
+            log_info(f"[아이건설넷] 로그인 시도 완료 (현재 주소: {driver.current_url})")
 
         driver.get(url)
         time.sleep(3)
