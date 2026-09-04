@@ -107,9 +107,22 @@ def scrape(url: str, org_name: str, target_date_limit, keywords: list[str]) -> t
                     time.sleep(2)
 
             if driver.current_url == url_before_login:
+                # 화면에 뭔가 에러 문구(비밀번호 틀림, 자동입력방지문자 등)가 떴는지
+                # 함께 잡아본다 - "0건"으로만 남는 것보다 훨씬 정확한 원인 파악이 된다.
+                page_text = ""
+                try:
+                    page_text = driver.find_element(By.TAG_NAME, "body").text
+                except Exception:
+                    pass
+                hint_words = ["일치하지", "틀렸", "잘못", "캡차", "자동입력방지",
+                              "보안문자", "로봇", "차단", "확인해", "가입"]
+                found_hints = [w for w in hint_words if w in page_text]
+                snippet = page_text[:300].replace("\n", " ")
                 log_failure(org_name, LOGIN_URL, "login",
                             f"로그인 시도 후에도 주소가 안 바뀜(여전히 {driver.current_url}) - "
-                            "아이디/비밀번호가 틀렸거나, 로그인 버튼을 못 찾았을 가능성")
+                            f"아이디/비밀번호가 틀렸거나, 로그인 버튼을 못 찾았을 가능성 "
+                            f"[화면에서 발견된 관련 단어: {found_hints or '없음'}] "
+                            f"[화면 상단 텍스트: {snippet}]")
             log_info(f"[아이건설넷] 로그인 시도 완료 (현재 주소: {driver.current_url})")
 
         driver.get(url)
