@@ -19,6 +19,7 @@ scrapers/custom/igunsul.py
 import time
 
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
@@ -74,30 +75,41 @@ def scrape(url: str, org_name: str, target_date_limit, keywords: list[str]) -> t
             pw_field.clear()
             pw_field.send_keys(config.IGUNSUL_PW)
 
-            # "로그인" 이라는 텍스트를 가진 버튼/링크를 정확히 찾아서 클릭한다
-            # (첫 번째 <form>을 통째로 제출하면 엉뚱한 폼일 수 있어서 이 방식이 더 안전함).
-            login_btn = None
-            for tag in ["button", "a", "input"]:
-                try:
-                    candidates = driver.find_elements(By.XPATH, f"//{tag}[contains(text(), '로그인')]")
-                    if candidates:
-                        login_btn = candidates[0]
-                        break
-                except Exception:
-                    continue
-            if login_btn:
-                try:
-                    login_btn.click()
-                except Exception:
-                    # 화면에 뜬 팝업/배너의 반투명 오버레이(blackPanel 등)가 버튼을
-                    # 가리고 있어서 일반 클릭이 막히는 경우가 실제로 있었다
-                    # (ElementClickInterceptedException). 자바스크립트로 직접
-                    # 클릭 이벤트를 발생시키면 화면상 겹침 여부와 무관하게 눌린다.
-                    driver.execute_script("arguments[0].click();", login_btn)
-            else:
-                pw_field.submit()  # 버튼을 못 찾으면 폼 자체 제출 시도 (최후 수단)
+            url_before_login = driver.current_url
 
+            # 1순위: 비밀번호 칸에서 Enter를 누른다 - 대부분의 로그인 폼은 이렇게
+            # 하면 실제 "로그인" 버튼을 누른 것과 똑같이 동작한다. 어떤 버튼이
+            # 진짜 제출 버튼인지 헷갈릴 일이 없어서 이 방식이 가장 안전하다.
+            pw_field.send_keys(Keys.RETURN)
             time.sleep(2)
+
+            # 그래도 로그인 후 화면(주소)이 안 바뀌었으면, 페이지 안의 "로그인"
+            # 버튼/링크를 찾아 클릭해본다 (Enter만으로 안 되는 폼도 있어서 보험 차원).
+            if driver.current_url == url_before_login:
+                login_btn = None
+                for tag in ["button", "a", "input"]:
+                    try:
+                        candidates = driver.find_elements(By.XPATH, f"//{tag}[contains(text(), '로그인')]")
+                        if candidates:
+                            login_btn = candidates[0]
+                            break
+                    except Exception:
+                        continue
+                if login_btn:
+                    try:
+                        login_btn.click()
+                    except Exception:
+                        # 화면에 뜬 팝업/배너의 반투명 오버레이(blackPanel 등)가 버튼을
+                        # 가리고 있어서 일반 클릭이 막히는 경우가 실제로 있었다
+                        # (ElementClickInterceptedException). 자바스크립트로 직접
+                        # 클릭 이벤트를 발생시키면 화면상 겹침 여부와 무관하게 눌린다.
+                        driver.execute_script("arguments[0].click();", login_btn)
+                    time.sleep(2)
+
+            if driver.current_url == url_before_login:
+                log_failure(org_name, LOGIN_URL, "login",
+                            f"로그인 시도 후에도 주소가 안 바뀜(여전히 {driver.current_url}) - "
+                            "아이디/비밀번호가 틀렸거나, 로그인 버튼을 못 찾았을 가능성")
             log_info(f"[아이건설넷] 로그인 시도 완료 (현재 주소: {driver.current_url})")
 
         driver.get(url)
