@@ -86,7 +86,14 @@ def scrape(url: str, org_name: str, target_date_limit, keywords: list[str]) -> t
                 except Exception:
                     continue
             if login_btn:
-                login_btn.click()
+                try:
+                    login_btn.click()
+                except Exception:
+                    # 화면에 뜬 팝업/배너의 반투명 오버레이(blackPanel 등)가 버튼을
+                    # 가리고 있어서 일반 클릭이 막히는 경우가 실제로 있었다
+                    # (ElementClickInterceptedException). 자바스크립트로 직접
+                    # 클릭 이벤트를 발생시키면 화면상 겹침 여부와 무관하게 눌린다.
+                    driver.execute_script("arguments[0].click();", login_btn)
             else:
                 pw_field.submit()  # 버튼을 못 찾으면 폼 자체 제출 시도 (최후 수단)
 
