@@ -583,6 +583,7 @@ elif menu == "공고 자동수집":
         if github_ready:
             with st.expander("🏢 사무실 PC(GitHub Actions) 최근 실행 상태", expanded=run_office_clicked):
                 if st.button("🔄 상태 새로고침"):
+                    get_google_sheet.clear()
                     st.rerun()
                 run_info = github_actions.get_latest_run()
                 if not run_info:
@@ -598,12 +599,17 @@ elif menu == "공고 자동수집":
 
     st.divider()
 
+    st.sidebar.subheader("🔍 공고 실시간 검색")
+    if st.sidebar.button("🔄 최신 데이터로 새로고침 (캐시 비우기)"):
+        get_google_sheet.clear()
+        st.rerun()
+    st.sidebar.caption("사무실 PC(GitHub Actions)로 수집한 결과는 최대 5분까지 화면에 안 보일 수 있어요 - 방금 수집했는데 안 보이면 이 버튼을 눌러보세요.")
+
     df = get_google_sheet(config.SHEET_NOTICES)
     if not df.empty and "공고제목" in df.columns:
         if "검토유무" not in df.columns:
             df["검토유무"] = "미검토"
 
-        st.sidebar.subheader("🔍 공고 실시간 검색")
         search_keyword = st.sidebar.text_input("공고제목 / 특이사항 검색", "")
         search_org = st.sidebar.text_input("발주기관(출처) 검색", "")
         hide_reviewed = st.sidebar.checkbox("✅ 검토 완료된 공고 숨기기", value=True)
