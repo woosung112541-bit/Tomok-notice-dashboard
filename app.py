@@ -33,11 +33,17 @@ def check_password() -> bool:
 
 
 def get_recent_log():
+    """settings 탭에 기록된 '최근 실행' 정보를 가져온다 (manage_sheet_lock이
+    실행마다 엔진명+시각을 기록함 - 클라우드/사무실PC 어느 쪽이든 반영됨)."""
     try:
         _, doc = storage.connect()
-        run_info = github_actions.get_latest_run_status()
-        if run_info:
-            return run_info.get("status", "-"), run_info.get("created_at", "-")
+        ws = storage._get_or_create_worksheet(doc, config.SHEET_SETTINGS, ["status", "locked_at", "engine"])
+        values = ws.get_all_values()
+        if values and len(values) > 0:
+            row = values[0]
+            engine_name = row[2] if len(row) > 2 and row[2] else "-"
+            locked_at = row[1] if len(row) > 1 and row[1] else "-"
+            return engine_name, locked_at
     except Exception:
         pass
     return "-", "-"
@@ -451,6 +457,52 @@ elif menu == "공고 자동수집":
                 conclusion_kor = {"success": "✅ 성공", "failure": "❌ 실패", None: "-"}.get(run_info["conclusion"], run_info["conclusion"])
                 st.write(f"**상태**: {status_kor} / {conclusion_kor}  \n**시작 시각**: {run_info['created_at']}")
                 st.link_button("GitHub Actions에서 실시간 로그 보기", run_info["html_url"])
+
+    # ── 수집된 공고 실시간 검색/검토 ─────────────────────────────────────────
+    # 검색 컨트롤은 사이드바에 둔다 (어느 메뉴에 있든 스크롤 없이 바로 보이도록).
+    st.sidebar.divider()
+    st.sidebar.subheader("🔍 공고 실시간 검색")
+    title_search = st.sidebar.text_input("공고제목 / 특이사항 검색", key="sidebar_title_search")
+    org_search = st.sidebar.text_input("발주기관(출처) 검색", key="sidebar_org_search")
+    hide_reviewed = st.sidebar.checkbox("✅ 검토 완료된 공고 숨기기", value=True, key="sidebar_hide_reviewed")
+
+    df_notices = get_google_sheet(config.SHEET_NOTICES)
+    if not df_notices.empty:
+        filtered = df_notices.copy()
+        if title_search:
+            mask = (filtered["공고제목"].astype(str).str.contains(title_search, case=False, na=False) |
+                    filtered["특이사항"].astype(str).str.contains(title_search, case=False, na=False))
+            filtered = filtered[mask]
+        if org_search:
+            filtered = filtered[filtered["출처"].astype(str).str.contains(org_search, case=False, na=False)]
+        if hide_reviewed and "검토유무" in filtered.columns:
+            filtered = filtered[filtered["검토유무"] == "미검토"]
+
+        st.divider()
+        if st.button("✅ 현재 화면 전체 일괄 검토완료"):
+            all_keys = filtered["notice_key"].tolist() if "notice_key" in filtered.columns else []
+            if all_keys and update_notice_status(all_keys, "내업무아님"):
+                get_google_sheet.clear()
+                st.rerun()
+
+        # "주요 4대 중앙 공고": EXTRA_SITES 3곳(한국시설안전협회/조달청 통합명부/
+        # 아이건설넷) + 나라장터(G2B API 결과는 출처에 "(나라장터)"가 붙어서 옴).
+        central_names = [s["org_name"] for s in config.EXTRA_SITES] + ["나라장터"]
+        is_central = filtered["출처"].astype(str).apply(lambda x: any(c in x for c in central_names))
+        central_df = filtered[is_central]
+        general_df = filtered[~is_central]
+
+        st.subheader(f"🌟 주요 4대 중앙 공고 ({len(central_df)}건)")
+        if central_df.empty:
+            st.info("해당되는 공고가 없습니다.")
+        else:
+            render_notice_table(central_df, "central_notices")
+
+        st.subheader(f"📋 일반 기관 공고 ({len(general_df)}건)")
+        if general_df.empty:
+            st.info("해당되는 공고가 없습니다.")
+        else:
+            render_notice_table(general_df, "general_notices")
 
 # ==========================================
 # 공고 통계 및 분석
