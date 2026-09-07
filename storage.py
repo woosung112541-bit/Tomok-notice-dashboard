@@ -87,10 +87,7 @@ def manage_sheet_lock(doc, action: str, engine_name: str = "통합 엔진") -> b
         return True
 
     if action == "unlock":
-        # A1(status)만 "free"로 바꾸고, B1(시각)/C1(엔진명)은 그대로 남겨둔다 -
-        # 이 값들이 대시보드의 "최근 실행" 표시로 계속 쓰이기 때문에, 실행이
-        # 끝났다고 지워버리면 "마지막으로 언제 실행했는지"를 알 수 없게 된다.
-        ws.update(range_name="A1", values=[["free"]])
+        ws.update(range_name="A1:C1", values=[["free", "", ""]])
         return True
 
     return False
