@@ -1,86 +1,75 @@
 """
 config.py
------------
-전체 시스템의 설정값을 한 곳에 모아둔다.
+---------
+프로젝트 전역 설정과 '시크릿(비밀값)' 로딩을 담당한다.
 
-필요한 시크릿 목록 (Streamlit secrets.toml 또는 GitHub Actions repo secrets):
-  GOOGLE_CREDENTIALS   : 구글 서비스계정 키 JSON 전체 내용
-  G2B_API_KEY          : 공공데이터포털에서 발급받은 나라장터 API 인증키
+시크릿(자격증명)은 절대 이 파일이나 다른 코드 파일에 직접 적지 않는다.
+아래 우선순위로 자동으로 찾아서 읽어온다.
+
+1) 환경변수 (GitHub Actions Secrets 등에서 주입)
+2) Streamlit secrets (.streamlit/secrets.toml, 또는 Streamlit Cloud의 Secrets 설정)
+
+로컬에서 테스트할 때는 `.streamlit/secrets.toml` (아래 예시 파일 `secrets.toml.example` 참고)
+또는 환경변수로 아래 값을 채워 넣으면 된다.
+
+  GOOGLE_CREDENTIALS   : 구글 서비스 계정 키 JSON 전체 내용 (문자열)
+  G2B_API_KEY          : 나라장터(조달청) OpenAPI 서비스키
   IGUNSUL_ID           : 아이건설넷 로그인 ID
   IGUNSUL_PW           : 아이건설넷 로그인 비밀번호
   DASHBOARD_PASSWORD   : Streamlit 대시보드 접속 비밀번호
-  GITHUB_TOKEN         : GitHub Actions 원격 실행용 Fine-grained PAT (Actions R/W)
-  GITHUB_REPO          : "owner/repo" 형식
 """
 
 import os
 import urllib.parse
 
+try:
+    import streamlit as st
+except ImportError:  # main.py를 CLI/GitHub Actions에서 단독 실행할 때는 streamlit이 없을 수 있음
+    st = None
 
-def get_secret(key: str) -> str:
-    """환경변수를 먼저 보고, 없으면 Streamlit secrets에서 찾는다."""
+
+def get_secret(key: str, default: str = "") -> str:
+    """환경변수 -> Streamlit secrets 순서로 값을 찾는다. 코드에 직접 값을 적지 않기 위함."""
     val = os.environ.get(key)
     if val:
         return val
-    try:
-        import streamlit as st
-        return st.secrets.get(key, "")
-    except Exception:
-        return ""
+    if st is not None:
+        try:
+            return st.secrets.get(key, default)
+        except Exception:
+            pass
+    return default
 
 
-GOOGLE_CREDENTIALS = get_secret("GOOGLE_CREDENTIALS")
+# ── 시크릿 (하드코딩 금지! 반드시 get_secret으로 로드) ─────────────────────────
 G2B_API_KEY = get_secret("G2B_API_KEY")
 IGUNSUL_ID = get_secret("IGUNSUL_ID")
 IGUNSUL_PW = get_secret("IGUNSUL_PW")
-DASHBOARD_PASSWORD = get_secret("DASHBOARD_PASSWORD")
+DASHBOARD_PASSWORD = get_secret("DASHBOARD_PASSWORD", "0804")
+
+# 대시보드의 '🏢 사무실 PC로 확실하게 수집' 버튼용 - GitHub Actions 워크플로우를
+# 원격으로 실행시키기 위한 값. GITHUB_TOKEN은 이 저장소에 대해
+# 'Actions: Read and write' 권한이 있는 Personal Access Token, GITHUB_REPO는
+# "owner/repository" 형식(예: "nc-company/Tomok-notice-dashboard").
+# 둘 다 없으면 그 버튼은 자동으로 비활성화된다(github_actions.is_configured() 참고).
 GITHUB_TOKEN = get_secret("GITHUB_TOKEN")
 GITHUB_REPO = get_secret("GITHUB_REPO")
-GITHUB_BRANCH = "main"
+GITHUB_BRANCH = get_secret("GITHUB_BRANCH", "main")
 
-# ── 요청 헤더 (User-Agent + 동적 Referer) ──────────────────────────────────────
-REQUEST_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-}
-
-
-def get_request_headers(url: str) -> dict:
-    """URL별로 '그 사이트 홈페이지에서 자연스럽게 넘어온 것처럼' Referer를 붙여서
-    반환한다. 일부 사이트(예: 세종도시교통공사)는 주소를 직접 쳐서 들어가면
-    '처리 중 오류가 발생하였습니다' 같은 안내 페이지로 돌려보내고, 자기 사이트
-    안에서 메뉴를 눌러 넘어온 경우에만 실제 내용을 보여주는 리퍼러 체크를 한다.
-    Referer를 그 사이트 자신의 루트 주소로 채워서 보내면, 이런 단순 체크는
-    대부분 통과한다 (서버가 별도 세션 상태까지 검사하는 아주 엄격한 경우는 예외)."""
-    try:
-        parsed = urllib.parse.urlparse(url)
-        referer = f"{parsed.scheme}://{parsed.netloc}/"
-    except Exception:
-        referer = url
-    return {**REQUEST_HEADERS, "Referer": referer}
-
-
-# ── 타임아웃 설정 ────────────────────────────────────────────────────────────
-REQUEST_CONNECT_TIMEOUT_DIRECT = 5
-REQUEST_CONNECT_TIMEOUT_PROXY = 15
-REQUEST_READ_TIMEOUT = 20
-SELENIUM_PAGE_LOAD_TIMEOUT = 45
-
-
-def get_request_timeout_tuple():
-    """프록시 사용 여부(환경변수 USE_PROXY_ACTIVE)에 따라 연결 타임아웃을 동적으로
-    조정한다 - 프록시를 거치면 왕복 지연이 커서 5초는 너무 짧다."""
-    connect_timeout = (REQUEST_CONNECT_TIMEOUT_PROXY if os.environ.get("USE_PROXY_ACTIVE") == "1"
-                        else REQUEST_CONNECT_TIMEOUT_DIRECT)
-    return (connect_timeout, REQUEST_READ_TIMEOUT)
-
-
-# ── 동시 처리량 ──────────────────────────────────────────────────────────────
-MAX_WORKERS_LIGHT = 8       # requests/selenium 대상 일반 사이트
-MAX_WORKERS_SELENIUM = 2    # 전용 핸들러(custom) 대상 - 브라우저를 직접 띄우므로 적게
-
-MAX_PAGINATION_SAFETY_CAP = 8  # 페이지네이션 무한루프 방지 안전 상한
+# ── 구글 시트 ────────────────────────────────────────────────────────────────
+GOOGLE_KEY_FILE = "google_key.json"  # get_secret("GOOGLE_CREDENTIALS")를 이 경로에 런타임에 기록해서 사용
+GOOGLE_SHEET_NAME = "맞춤공고_DB"
+SHEET_NOTICES = "notices"
+SHEET_COLLECTED_ORGS = "collected_orgs"
+SHEET_EMPTY_ORGS = "empty_orgs"
+SHEET_URL_OVERRIDES = "url_overrides"
+SHEET_SETTINGS = "settings"
+SHEET_RUN_LOG = "run_log"          # 신규: 실행 로그(실패 사유 포함)를 구글시트에 남겨 대시보드에서 확인
+SHEET_MANUAL_CHECK = "manual_check"  # 신규: 자동 수집이 불가능하다고 판단된 발주처 목록
+SHEET_TEAM_NOTES = "team_notes"    # 신규: "게시판/메모장" 메뉴용 팀 공유 메모
+SHEET_EXCLUDED_NOTICES = "excluded_notices"  # 신규: 제외 키워드에 걸려 자동 분류된 공고 목록
+SHEET_SITE_RESULTS = "site_results"  # 신규: "AI 전수조사 로그" - 성공/실패 관계없이 사이트별 결과
+SHEET_RUN_SUMMARY = "run_summary"    # 신규: "AI 전수조사 로그" - 실행 1회당 요약 1줄
 
 # ── 입력 명부 엑셀 ───────────────────────────────────────────────────────────
 INPUT_EXCEL_FILENAME = "등록명부 정리시트.xlsx"
@@ -120,8 +109,9 @@ COMMON_ROW_SELECTORS = [
 # 공고 본문 특이사항 태깅용 키워드 (업무 분류용, 필요 시 이 목록만 수정하면 전체 반영됨)
 PLUS_KWS = ["종합", "토목", "안전점검", "수행기관", "대전"]
 MINUS_KWS = ["건축분야", "신축", "번지", "증축", "수의", "건립"]
-REGION_HINT_KWS = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종',
-                    '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주']
+REGION_KWS = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종', '경기',
+              '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주']
+REGION_HINT_KWS = ['지역제한', '소재지', '영업소', '한정', '관내', '소재한', '위치한']
 
 # 명부 엑셀 외에 항상 포함하는 사이트 (조달청 통합명부, 한국시설안전협회, 아이건설넷 등)
 EXTRA_SITES = [
@@ -137,6 +127,7 @@ EXTRA_SITES = [
 G2B_VIRTUAL_ORG_NAME = "나라장터 (API - 사이트 스캔 없이 바로 조회)"
 
 # 도메인별 전용 처리기(scrapers/custom/*)로 보낼 도메인 매핑.
+# 여기에 등록된 도메인은 requests/일반 selenium을 거치지 않고 바로 전용 핸들러로 간다.
 CUSTOM_HANDLER_DOMAINS = {
     "khnp.co.kr": "khnp",
     "igunsul.net": "igunsul",
@@ -144,10 +135,14 @@ CUSTOM_HANDLER_DOMAINS = {
 }
 
 # 일반 Selenium(3단계)까지는 시도하지만, 그래도 안 되면 '실패 로그 분석'에서 참고용으로
-# 보여줄 알려진 어려운 사이트 사유 (보안 프로그램, 로그인 필요 등).
+# 보여줄, 미리 알려진 자동화가 특히 어려운 사이트(봇 탐지/보안 프로그램 등).
+# url은 '바로가기' 버튼이 실제로 열어야 할 정확한 페이지(도메인 루트가 아니라 실제 조회 화면).
 KNOWN_HARD_SITES = {
-    "khnp.co.kr": {"label": "한국수력원자력 K-Pro", "url": "https://ebiz.khnp.co.kr/login.do",
-                   "reason": "AnySign/TouchEn 계열 보안 프로그램 사용 - 자동화가 사실상 불가능한 것으로 판단됨. 수동 확인 권장."},
+    "khnp.co.kr": {
+        "label": "한국수력원자력 K-Pro",
+        "url": "https://ebiz.khnp.co.kr/login.do",
+        "reason": "AnySign/TouchEn 등 보안 프로그램으로 자동화가 매우 어려움 (K-Pro 전자상거래시스템)",
+    },
 }
 
 # 명부 엑셀에서 팀이 이미 "*24년부터 조달청*" 식으로 표시해둔 기관들.
@@ -166,18 +161,69 @@ KNOWN_G2B_REDIRECT_ORGS = {
 
 # ── 무료 공개 프록시 우회 (대시보드 토글로 켜고 끔) ────────────────────────────
 # ProxyScrape 무료 API - 회원가입/키 없이 한국(KR) IP 목록을 텍스트로 제공.
-FREE_PROXY_API_URL = ("https://api.proxyscrape.com/v2/?request=getproxies&protocol=http"
-                       "&timeout=5000&country=KR&ssl=all&anonymity=all")
+# proxy_format=ipport 이면 'ip:port' 형태 한 줄씩 내려온다.
+FREE_PROXY_API_URL = (
+    "https://api.proxyscrape.com/v4/free-proxy-list/get"
+    "?request=display_proxies&proxy_format=ipport&format=text"
+    "&country=kr&protocol=http"
+)
+PROXY_TEST_URL = "https://www.naver.com"  # 프록시가 실제로 살아있는지 확인할 때 쓰는 사이트
+PROXY_TEST_TIMEOUT = 6      # 프록시 하나 테스트할 때 기다리는 시간(초)
+PROXY_CANDIDATES_LIMIT = 20  # 앞에서부터 최대 몇 개까지 시도해볼지 (너무 많으면 시작이 느려짐)
 
-# ── 구글시트 탭 이름 ─────────────────────────────────────────────────────────
-SHEET_NOTICES = "notices"
-SHEET_COLLECTED_ORGS = "collected_orgs"
-SHEET_EMPTY_ORGS = "empty_orgs"
-SHEET_URL_OVERRIDES = "url_overrides"
-SHEET_SETTINGS = "settings"
-SHEET_RUN_LOG = "run_log"          # 신규: 실행 로그(실패 사유 포함)를 구글시트에 남겨 대시보드에서 확인
-SHEET_MANUAL_CHECK = "manual_check"  # 신규: 자동 수집이 불가능하다고 판단된 발주처 목록
-SHEET_TEAM_NOTES = "team_notes"    # 신규: "게시판/메모장" 메뉴용 팀 공유 메모
-SHEET_EXCLUDED_NOTICES = "excluded_notices"  # 신규: 제외 키워드에 걸려 자동 분류된 공고 목록
-SHEET_SITE_RESULTS = "site_results"  # 신규: "AI 전수조사 로그" - 성공/실패 관계없이 사이트별 결과
-SHEET_RUN_SUMMARY = "run_summary"    # 신규: "AI 전수조사 로그" - 실행 1회당 요약 1줄
+REQUEST_TIMEOUT = 20
+# (연결타임아웃, 읽기타임아웃) 튜플로 분리. 접속 자체가 막힌 사이트는 서버가 아예 응답하지
+# 않으므로 5초면 충분히 판단 가능하다 (20초씩 기다릴 필요 없음 - 차단된 사이트가 많을 때
+# 전체 실행 시간을 크게 줄여준다). 반면 접속은 되는데 응답이 느린 사이트를 위해
+# 읽기 타임아웃은 기존처럼 넉넉하게 20초 유지.
+#
+# 단, 프록시를 거칠 때는 클라이언트->프록시->대상 서버로 홉이 하나 늘어나고,
+# https:// 사이트는 프록시와 'CONNECT 터널'을 먼저 맺어야 하는데 이 단계도
+# '연결 타임아웃' 값을 쓴다. 무료 프록시는 그 자체로 느릴 수 있어서 5초는
+# 빠듯하다 - 실제로 "그냥 느려서" 실패한 걸 "차단됐다"고 잘못 판단하는 사례가
+# 나왔다. 그래서 프록시 사용 중에는 연결 타임아웃을 더 넉넉하게 준다.
+REQUEST_CONNECT_TIMEOUT_DIRECT = 5
+REQUEST_CONNECT_TIMEOUT_PROXY = 15
+
+
+def get_request_timeout_tuple() -> tuple[int, int]:
+    """지금 프록시를 쓰고 있는지 여부에 따라 연결 타임아웃을 다르게 준다.
+    (모듈 로딩 시점이 아니라 요청 시점에 매번 계산해야 한다 - main.py가 프록시를
+    찾아서 환경변수를 설정하는 시점이 config.py가 import된 다음이기 때문이다.)"""
+    if os.environ.get("HTTP_PROXY"):
+        return (REQUEST_CONNECT_TIMEOUT_PROXY, REQUEST_TIMEOUT)
+    return (REQUEST_CONNECT_TIMEOUT_DIRECT, REQUEST_TIMEOUT)
+
+
+SELENIUM_PAGE_LOAD_TIMEOUT = 45
+# 하루에 공고를 많이 올리는 게시판(예: 유성구청 도시계획과, 하루 10건 이상)은
+# 1페이지만 보면 최근 공고가 이미 2페이지로 밀려나 있을 수 있다. 그래서 페이지를
+# 고정된 개수만큼이 아니라 '이미 알고 있는 공고(중복)나 수집 기간보다 오래된
+# 공고를 만날 때까지' 계속 따라간다 (page_has_stop_signal 참고). 이 값은 혹시
+# 모를 오작동(끝없이 페이지가 이어지는 경우)을 막는 안전 상한선일 뿐이다.
+MAX_PAGINATION_SAFETY_CAP = 8
+MAX_WORKERS_LIGHT = 4   # requests 전용 사이트 동시 처리 수
+MAX_WORKERS_SELENIUM = 2  # Selenium을 쓰는 사이트는 메모리 문제로 동시 처리 수를 낮게 유지
+
+# 일부 관공서 사이트는 단순 "Mozilla/5.0" 같은 짧은 UA를 봇으로 간주해 차단한다.
+# 실제 브라우저와 가까운 완전한 UA 문자열을 공용으로 사용한다.
+REQUEST_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+    "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+}
+
+
+def get_request_headers(url: str) -> dict:
+    """URL별로 '그 사이트 홈페이지에서 자연스럽게 넘어온 것처럼' Referer를 붙여서
+    반환한다. 일부 사이트(예: 세종도시교통공사)는 주소를 직접 쳐서 들어가면
+    '처리 중 오류가 발생하였습니다' 같은 안내 페이지로 돌려보내고, 자기 사이트
+    안에서 메뉴를 눌러 넘어온 경우에만 실제 내용을 보여주는 리퍼러 체크를 한다.
+    Referer를 그 사이트 자신의 루트 주소로 채워서 보내면, 이런 단순 체크는
+    대부분 통과한다 (서버가 별도 세션 상태까지 검사하는 아주 엄격한 경우는 예외)."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+        referer = f"{parsed.scheme}://{parsed.netloc}/"
+    except Exception:
+        referer = url
+    return {**REQUEST_HEADERS, "Referer": referer}

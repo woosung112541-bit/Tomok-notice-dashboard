@@ -1,18 +1,21 @@
 """
 scrapers/generic_selenium.py
--------------------------------
-3순위: requests로 게시판 행을 못 찾은 경우(JS 렌더링이 필요한 사이트로 추정)
-Selenium으로 승격해서 다시 시도한다.
+------------------------------
+3순위: requests로는 안 잡히는(=자바스크립트 렌더링이 필요한) 일반 게시판.
+로그인이나 다단계 클릭처럼 사이트 고유의 절차가 필요한 곳은 여기서 처리하지 않고
+scrapers/custom/*.py로 보낸다 (site_registry.py가 handler_type='custom'으로 분류).
+
+get_driver()는 custom 핸들러에서도 재사용한다 (한 곳에서만 Chrome 옵션을 관리하기 위함).
 """
 
 import os
 
+from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
-from bs4 import BeautifulSoup
 
 import config
 from scrapers.base import (extract_row_fields, matches_positive_keywords, is_excluded_title, deep_scan_notice,
@@ -20,24 +23,39 @@ from scrapers.base import (extract_row_fields, matches_positive_keywords, is_exc
 from utils.logging_setup import log_failure, log_info
 
 
-def get_driver():
-    """헤드리스 Chrome WebDriver를 만든다. 무료 프록시 토글이 켜져 있으면
-    (환경변수 HTTP_PROXY/HTTPS_PROXY) 그 프록시를 통해 나가도록 설정한다."""
+def get_driver() -> webdriver.Chrome:
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
-    options.add_argument(f"user-agent={config.REQUEST_HEADERS['User-Agent']}")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
 
-    proxy = os.environ.get("HTTP_PROXY") or os.environ.get("HTTPS_PROXY")
-    if proxy:
-        options.add_argument(f"--proxy-server={proxy}")
+    # main.py가 프록시 우회 토글이 켜졌을 때 환경변수로 넘겨준 값. Selenium/Chrome은
+    # HTTP_PROXY 환경변수를 자동으로 읽지 않으므로 명시적으로 --proxy-server 옵션을 준다.
+    selenium_proxy = os.environ.get("SCRAPER_SELENIUM_PROXY")
+    if selenium_proxy:
+        options.add_argument(f"--proxy-server=http://{selenium_proxy}")
 
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=options)
+    try:
+        service = Service("/usr/bin/chromedriver")
+        driver = webdriver.Chrome(service=service, options=options)
+    except Exception:
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=options)
+
     driver.set_page_load_timeout(config.SELENIUM_PAGE_LOAD_TIMEOUT)
+    try:
+        driver.execute_cdp_cmd("Network.setUserAgentOverride", {
+            "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                         "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        })
+        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    except Exception:
+        pass
     return driver
 
 

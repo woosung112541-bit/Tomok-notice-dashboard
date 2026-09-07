@@ -1,9 +1,10 @@
 streamlit
 pandas
-openpyxl
 requests
 beautifulsoup4
+openpyxl
 gspread
-google-auth
 selenium
 webdriver-manager
+pypdf
+olefile

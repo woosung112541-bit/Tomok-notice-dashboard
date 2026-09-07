@@ -1,8 +1,9 @@
 """
 scrapers/generic_requests.py
--------------------------------
-2순위(제미나이 원칙): 대부분의 게시판은 requests + BeautifulSoup만으로 충분하다.
-JS 렌더링이 필요한 사이트만 generic_selenium.py로 승격시킨다 (engine.py에서 판단).
+-----------------------------
+2순위(제미나이 원칙 #3 기준: API > requests > selenium): 자바스크립트 렌더링이 필요 없는
+일반적인 지자체/기관 게시판. 빠르고 가볍다. 여기서 0건이 나오면 engine.py가 자동으로
+generic_selenium으로 승격시킨다 (조용히 포기하지 않음).
 """
 
 import requests

@@ -12,8 +12,6 @@ scrapers/api_g2b.py
 에서 검색해서 보기"). 나라장터 정식 입찰공고 제목은 게시판 공지 제목과 달리
 "OO 교량 정밀안전진단 용역"처럼 실제 사업명이라 "모집" 같은 게시판용 키워드가
 애초에 거의 안 맞는다 - 잘못 거르느니 전부 가져와서 대시보드 검색으로 보게 한다.
-단, EXCLUDE_KEYWORDS(업무 무관 제외 키워드)는 출처와 상관없는 품질 필터이므로
-나라장터에도 동일하게 적용한다.
 """
 
 from datetime import datetime, timezone, timedelta
@@ -82,7 +80,7 @@ def fetch(api_key: str, days_ago: int) -> tuple[list[dict], list[dict]]:
 
         for item in items:
             title = item.get("bidNtceNm", "")
-            if not title or is_excluded_title(title):
+            if not title:
                 continue
 
             org = item.get("dmdInsttNm", "조달청")

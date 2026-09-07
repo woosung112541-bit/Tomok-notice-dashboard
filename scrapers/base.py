@@ -1,12 +1,17 @@
 """
 scrapers/base.py
--------------------
-모든 게시판형 스크래퍼(generic_requests, generic_selenium, custom/*)가 공유하는
-공통 유틸리티: 행 선택, 제목/날짜/링크 추출, 페이지네이션 다음 페이지 찾기,
-적응형 페이지네이션 중지 신호 판단, 상세페이지 딥스캔, 키워드 필터(핵심키워드
-강제포함 / 제외키워드 / 순수 포함 매칭).
+-----------------
+모든 스크래퍼(requests 버전, selenium 버전, custom 버전)가 공통으로 쓰는 로직.
+
+- extract_row_fields(): 게시판 한 행(row)에서 제목/링크/날짜를 뽑아낸다.
+- deep_scan_notice(): 공고 상세 페이지 + 첨부파일(PDF/HWP)까지 열어서
+  PLUS_KWS/MINUS_KWS/지역제한 키워드를 태깅한다 ('특이사항' 컬럼).
+
+주의: 이 파일의 함수들은 '어디서(requests든 selenium이든) 가져온 HTML/텍스트인지'를
+신경 쓰지 않는다. 이미 만들어진 BeautifulSoup Tag나 텍스트만 받는다.
 """
 
+import io
 import re
 import urllib.parse
 
@@ -14,7 +19,22 @@ import requests
 from bs4 import BeautifulSoup
 
 import config
+from utils.date_parser import find_all_dates_in_row
 
+try:
+    import olefile
+except ImportError:
+    olefile = None
+
+try:
+    from pypdf import PdfReader
+except ImportError:
+    PdfReader = None
+
+# "아산시 공고 제2026-3026호", "OO시 고시 제123호" 처럼 '공고/고시 번호' 형식만
+# 담은 텍스트를 가려내기 위한 패턴. 아산시처럼 '고시공고번호' 열과 '제목' 열이
+# 따로 있는 게시판에서, 링크가 번호 쪽에 걸려있으면 지금까지는 번호만 제목으로
+# 잘못 저장되고 있었다 (실제 제목은 옆 칸의 일반 텍스트였음).
 _NOTICE_NUMBER_PATTERN = re.compile(r'^[가-힣0-9\s]{0,20}(공고|고시)\s*제?\s*[\d\-]+\s*호$')
 
 # "2026-08-21", "2026-08-21 ~ 2026-09-18", "2026.08.21" 처럼 날짜(또는 날짜 범위)
@@ -25,57 +45,32 @@ _NOTICE_NUMBER_PATTERN = re.compile(r'^[가-힣0-9\s]{0,20}(공고|고시)\s*제
 _DATE_ONLY_PATTERN = re.compile(r'^[\d.\-/년월일\s]+(~|-)?\s*[\d.\-/년월일\s]*$')
 
 
-def select_rows(soup: BeautifulSoup) -> list:
-    """등록된 후보 셀렉터를 순서대로 시도해서 첫 번째로 결과가 있는 것을 쓴다.
-
-    그래도 못 찾으면 '펼쳐진 li형' 특수 구조(예: 낙동강유역환경청 등 mcee.go.kr
-    계열)를 시도한다 - 이런 사이트는 번호/제목/등록자/날짜/조회수가 각각 독립된
-    형제 <li>로 나란히 펼쳐져 있고, 이를 하나로 묶는 상위 태그(<tr>/<li> 등)가
-    없다. <li class="title">(제목 칸에는 이 클래스가 붙어있다는 걸 실제 화면으로
-    확인함)를 기준점 삼아, 바로 앞 형제 1개(번호)와 다음 li.title이 나오기 전까지의
-    뒤쪽 형제들(등록자/날짜/조회수 등, 사이트마다 개수가 달라도 자동으로 대응됨)을
-    모아 하나의 합성 '행'(새 <div> 컨테이너)으로 재구성한다. 원본 트리는 건드리지
-    않도록 각 <li>를 복사해서 붙인다."""
-    for sel in config.COMMON_ROW_SELECTORS:
-        rows = soup.select(sel)
-        if rows:
-            return rows
-
-    title_lis = soup.select("li.title")
-    if not title_lis:
-        return []
-
-    import copy
-    synthetic_rows = []
-    for title_li in title_lis:
-        group = []
-        prev_sib = title_li.find_previous_sibling("li")
-        if prev_sib is not None and prev_sib not in title_lis:
-            group.append(prev_sib)
-        group.append(title_li)
-
-        sib = title_li.find_next_sibling("li")
-        while sib is not None and sib not in title_lis:
-            group.append(sib)
-            sib = sib.find_next_sibling("li")
-
-        wrapper = BeautifulSoup("<div></div>", "html.parser").div
-        for el in group:
-            wrapper.append(copy.copy(el))
-        synthetic_rows.append(wrapper)
-
-    return synthetic_rows
+def resolve_link(base_url: str, href: str, onclick: str = "") -> str | None:
+    """
+    <a href="..."> 또는 onclick="fn_view(...)" 형태에서 실제로 이동 가능한 링크를 만든다.
+    href가 '#'이거나 javascript:인데 onclick도 없으면 None을 반환 (호출부에서 base_url로 대체).
+    """
+    href = (href or "").strip()
+    if href and "javascript:" not in href.lower() and href != "#":
+        return urllib.parse.urljoin(base_url, href)
+    return None
 
 
 def _pick_title(row, anchor=None) -> str:
-    """행(row) 안의 여러 텍스트 후보 중 '진짜 제목'을 고른다.
+    """
+    행(row) 안에서 실제 '제목'으로 보이는 텍스트를 고른다.
 
-    - 공고번호 패턴("OO 공고 제2026-1호")과 순수 날짜(범위) 텍스트는 후보에서
-      제외한다 (실제 제목보다 우연히 길어질 수 있어서, 그냥 놔두면 이런 것들이
-      "제목"으로 잘못 뽑히는 경우가 실제로 있었다).
-    - 남은 후보 중 가장 긴 것을 제목으로 채택한다 (보통 실제 제목이 가장 길다).
-    - <a> 태그가 없는 행(예: <tr onclick="...">로 여는 방식)도 지원한다 - anchor가
-      None이어도 셀 텍스트만으로 동작한다.
+    대부분의 게시판은 <a> 태그 자체가 제목이라 이걸로 충분하지만(예: 보령시,
+    유성구청), 아산시처럼 '고시공고번호'(예: 아산시 공고 제2026-3026호)와
+    '제목'이 서로 다른 칸에 있고 링크는 번호 쪽에 걸려있는 경우가 있다. 이런
+    사이트에서 <a> 태그 텍스트만 쓰면 번호만 저장되고 진짜 제목은 유실된다.
+
+    그래서 <a> 텍스트 하나만 보지 않고, 같은 행의 모든 셀 텍스트를 후보로 모은
+    뒤 '공고/고시 제OOOO호' 형식만 담은 후보는 제외하고, 남은 것 중 가장 긴
+    (=가장 설명적인) 텍스트를 제목으로 고른다. 번호/날짜/담당부서 같은 다른
+    칸은 대개 짧아서 이 방식으로 자연스럽게 걸러진다. <a> 텍스트 자체가 이미
+    진짜 제목인 일반적인 경우에도, 대개 그게 가장 길기 때문에 그대로 선택되어
+    기존 사이트들의 동작은 그대로 유지된다.
     """
     candidates = []
     if anchor is not None:
@@ -94,13 +89,6 @@ def _pick_title(row, anchor=None) -> str:
                 if not _NOTICE_NUMBER_PATTERN.match(c) and not _DATE_ONLY_PATTERN.match(c)]
     pool = filtered or candidates
     return max(pool, key=len)
-
-
-def resolve_link(base_url: str, href: str) -> str:
-    """상대경로 href를 base_url 기준 절대경로로 변환. javascript: 링크 등은 base_url로 대체."""
-    if not href or href.strip().lower().startswith("javascript:"):
-        return base_url
-    return urllib.parse.urljoin(base_url, href)
 
 
 def extract_row_fields(row, base_url: str, target_date_limit) -> dict | None:
@@ -125,114 +113,16 @@ def extract_row_fields(row, base_url: str, target_date_limit) -> dict | None:
     else:
         link = base_url
 
-    row_text = " ".join(row.stripped_strings)
-    post_date = find_earliest_date_in_text(row_text)
+    dates = find_all_dates_in_row(row.stripped_strings)
+    post_date = min(dates) if dates else None
     if not post_date or post_date < target_date_limit:
         return None
 
-    return {"title": title, "link": link, "date_str": post_date.strftime("%Y.%m.%d")}
-
-
-def find_earliest_date_in_text(text: str):
-    """utils.date_parser의 날짜 스캐너를 그대로 사용 (순환참조 방지를 위해 지연 import)."""
-    from utils.date_parser import find_earliest_date
-    return find_earliest_date(text)
-
-
-def find_next_page_url(soup: BeautifulSoup, current_url: str, page_num: int) -> str | None:
-    """다음 페이지 링크를 찾는다. pageIndex/page 파라미터 패턴과, 숫자 페이지 링크
-    ("2", "3"...) 둘 다 시도한다."""
-    next_num = page_num + 1
-
-    # 1) 숫자 텍스트를 가진 <a> 태그 중 next_num과 일치하는 것 찾기
-    for a in soup.find_all("a"):
-        text = a.get_text(strip=True)
-        if text == str(next_num) and a.get("href"):
-            return resolve_link(current_url, a["href"])
-
-    # 2) "다음"/"next"/">" 텍스트를 가진 링크
-    for a in soup.find_all("a"):
-        text = a.get_text(strip=True).lower()
-        if text in ("다음", "next", ">", "»") and a.get("href"):
-            return resolve_link(current_url, a["href"])
-
-    return None
-
-
-def page_has_stop_signal(rows: list, org_name: str, target_date_limit, history_keys: set) -> bool:
-    """이 페이지에서 '이미 아는 공고' 또는 '수집기간보다 오래된 공고'를 만났으면
-    True를 반환해서, 더 이상 페이지를 넘어갈 필요가 없음을 알린다."""
-    for row in rows:
-        try:
-            fields = extract_row_fields(row, "", target_date_limit)
-        except Exception:
-            continue
-        if not fields:
-            # 날짜 조건에 못 미쳐서 None이 나온 경우도 '더 오래된 데이터에 도달함'
-            # 신호로 취급할 수 있으나, 여기서는 단순히 넘어간다(page 자체의
-            # 종료는 아래 notice_key 체크로 판단).
-            continue
-        notice_key = f"{org_name}|||{fields['title']}"
-        if notice_key in history_keys:
-            return True
-    return False
-
-
-def deep_scan_notice(url: str) -> str:
-    """상세 페이지 + 첨부파일까지 열어 PLUS/MINUS/지역제한 키워드를 태깅해서 문자열로 반환."""
-    headers = config.get_request_headers(url)
-    full_text = ""
-    try:
-        res = requests.get(url, headers=headers, verify=False, timeout=config.get_request_timeout_tuple())
-        soup = BeautifulSoup(res.text, "html.parser")
-        full_text = soup.get_text(" ", strip=True)
-    except Exception:
-        return "-"
-
-    tags = []
-    plus_hits = [kw for kw in config.PLUS_KWS if kw in full_text]
-    minus_hits = [kw for kw in config.MINUS_KWS if kw in full_text]
-    if plus_hits:
-        tags.append("🔥PLUS(" + ",".join(plus_hits) + ")")
-    if minus_hits:
-        tags.append("🧊MINUS(" + ",".join(minus_hits) + ")")
-    region_hits = [kw for kw in config.REGION_HINT_KWS if kw in full_text]
-    if region_hits:
-        tags.append("📍지역제한(" + ",".join(region_hits) + ")")
-
-    return " / ".join(tags) if tags else "-"
-
-
-def discover_additional_boards(base_url: str, domain: str) -> list[str]:
-    """base_url 페이지 안에서, 게시판일 가능성이 높은 추가 메뉴/iframe 링크를
-    찾아서 후보 URL 목록으로 반환한다 (예: '고시공고', '입찰공고' 텍스트를 가진
-    메뉴 링크, 또는 게시판을 담고 있는 iframe의 src)."""
-    candidates = []
-    try:
-        res = requests.get(base_url, headers=config.get_request_headers(base_url),
-                            verify=False, timeout=config.get_request_timeout_tuple())
-        soup = BeautifulSoup(res.text, "html.parser")
-    except Exception:
-        return candidates
-
-    for iframe in soup.find_all("iframe"):
-        src = iframe.get("src")
-        if src:
-            resolved = resolve_link(base_url, src)
-            if resolved not in candidates and resolved != base_url:
-                candidates.append(resolved)
-
-    for a in soup.find_all("a"):
-        text = a.get_text(strip=True)
-        href = a.get("href", "")
-        if not href or not text:
-            continue
-        if any(kw in text for kw in config.BOARD_MENU_KEYWORDS):
-            resolved = resolve_link(base_url, href)
-            if resolved not in candidates and resolved != base_url:
-                candidates.append(resolved)
-
-    return candidates[:3]  # 후보가 너무 많아지지 않도록 상위 몇 개만
+    return {
+        "title": title,
+        "link": link,
+        "date_str": post_date.strftime("%Y.%m.%d"),
+    }
 
 
 def is_force_included(title: str) -> bool:
@@ -262,3 +152,156 @@ def matches_keywords(title: str, keywords: list[str]) -> bool:
     if is_excluded_title(title):
         return False
     return matches_positive_keywords(title, keywords)
+
+
+def _extract_text_from_attachment(file_url: str, headers: dict) -> str:
+    try:
+        res = requests.get(file_url, headers=headers, verify=False, timeout=config.get_request_timeout_tuple(), stream=True)
+        if int(res.headers.get("content-length", 0)) > 5_000_000:
+            return ""
+        content = res.content
+    except Exception:
+        return ""
+
+    text = ""
+    lower = file_url.lower()
+    if lower.endswith(".pdf") and PdfReader is not None:
+        try:
+            reader = PdfReader(io.BytesIO(content))
+            for page in reader.pages[:3]:
+                text += " " + (page.extract_text() or "")
+        except Exception:
+            pass
+    elif lower.endswith(".hwp") and olefile is not None:
+        try:
+            f = olefile.OleFileIO(io.BytesIO(content))
+            if f.exists("PrvText"):
+                text += " " + f.openstream("PrvText").read().decode("utf-16le", errors="ignore")
+        except Exception:
+            pass
+    return text
+
+
+def deep_scan_notice(url: str) -> str:
+    """상세 페이지 + 첨부파일까지 열어 PLUS/MINUS/지역제한 키워드를 태깅해서 문자열로 반환."""
+    headers = config.get_request_headers(url)
+    full_text = ""
+    try:
+        res = requests.get(url, headers=headers, verify=False, timeout=config.get_request_timeout_tuple())
+        res.encoding = "utf-8"
+        soup = BeautifulSoup(res.text, "html.parser")
+        full_text += soup.get_text()
+
+        for a in soup.find_all("a", href=True):
+            href = a["href"].lower()
+            if href.endswith(".pdf") or href.endswith(".hwp"):
+                file_url = urllib.parse.urljoin(url, a["href"])
+                full_text += " " + _extract_text_from_attachment(file_url, headers)
+    except Exception:
+        return "-"
+
+    found_specials = set()
+    for kw in config.PLUS_KWS:
+        if kw in full_text:
+            found_specials.add(f"🔴{kw}")
+    for kw in config.MINUS_KWS:
+        if kw in full_text:
+            found_specials.add(f"🔵{kw}")
+
+    if any(hint in full_text for hint in config.REGION_HINT_KWS):
+        found_regions = {r for r in config.REGION_KWS if r in full_text}
+        found_specials.add(f"지역제한({','.join(found_regions)})" if found_regions else "지역제한(상세확인)")
+
+    return "🔥 " + ", ".join(found_specials) if found_specials else "-"
+
+
+def discover_additional_boards(base_url: str, domain: str) -> list[str]:
+    """
+    메인/상위 페이지에서 추가 게시판 후보를 찾는다. 두 가지를 찾는다.
+
+    1) <iframe src="..."> — 대전 동구청처럼 '입찰공고' 메뉴 페이지 안에 실제
+       게시판이 다른 도메인(eminwon.xxx.go.kr 등)의 iframe으로 통째로 끼워진
+       경우가 매우 흔하다. 겉 페이지 HTML만 보면 표가 하나도 안 보이므로,
+       iframe의 src를 최우선 후보로 별도 수집한다. (도메인 제한을 걸지 않는다 —
+       실제 게시판이 다른 서브도메인에 있는 게 이 패턴의 핵심이기 때문)
+    2) '고시·공고·입찰' 등 게시판으로 보이는 <a href> 메뉴 링크 (기존 로직)
+    """
+    discovered_iframes = set()
+    discovered_menu_links = set()
+    try:
+        res = requests.get(base_url, headers=config.get_request_headers(base_url), verify=False, timeout=config.get_request_timeout_tuple())
+        soup = BeautifulSoup(res.text, "html.parser")
+
+        for iframe in soup.find_all("iframe", src=True):
+            src = iframe["src"].strip()
+            if src and "javascript:" not in src.lower():
+                discovered_iframes.add(urllib.parse.urljoin(base_url, src))
+
+        for a_tag in soup.find_all("a", href=True):
+            text = a_tag.get_text(strip=True).replace(" ", "")
+            href = a_tag["href"]
+            if any(kw in text for kw in config.BOARD_MENU_KEYWORDS):
+                if "javascript:" in href.lower() or href == "#":
+                    continue
+                full_url = urllib.parse.urljoin(base_url, href)
+                if domain in full_url:
+                    discovered_menu_links.add(full_url)
+    except Exception:
+        pass
+
+    ranked_menu = sorted(discovered_menu_links,
+                          key=lambda u: any(k in u.lower() for k in ("gosi", "noti", "bid")), reverse=True)
+    # iframe은 겉 페이지가 사실상 빈 껍데기라는 강한 신호이므로 최우선으로 앞에 배치
+    return list(discovered_iframes) + ranked_menu[:5]
+
+
+def select_rows(soup: BeautifulSoup):
+    """공통 셀렉터 목록을 순서대로 시도해 첫 번째로 매치되는 행 목록을 반환."""
+    for selector in config.COMMON_ROW_SELECTORS:
+        rows = soup.select(selector)
+        if rows:
+            return rows
+    return []
+
+
+def find_next_page_url(soup: BeautifulSoup, base_url: str, current_page_num: int) -> str | None:
+    """1페이지(또는 현재 페이지) 안에서 '다음 번호(current_page_num+1)' 링크를 찾아 반환한다.
+    없으면 None (더 이상 갈 페이지가 없다는 뜻)."""
+    target_text = str(current_page_num + 1)
+    for a_tag in soup.find_all("a", href=True):
+        if a_tag.get_text(strip=True) != target_text:
+            continue
+        href = a_tag["href"].strip()
+        if not href or href == "#" or "javascript:" in href.lower():
+            continue
+        return urllib.parse.urljoin(base_url, href)
+    return None
+
+
+def page_has_stop_signal(rows, org_name: str, target_date_limit, history_keys: set) -> bool:
+    """
+    현재 페이지 안에 '여기서부터는 더 안 가도 되는 지점'이 있는지 확인한다.
+    게시판은 보통 최신순 정렬이므로, 아래 둘 중 하나라도 만나면 그보다 아래(더
+    오래된 쪽)는 이미 다 지나간 내용이라고 보고 페이지네이션을 멈춘다.
+
+      1) 등록일이 이번 수집 기간(target_date_limit)보다 오래된 행을 만남
+      2) 이미 지난 실행에서 저장된 공고(notice_key가 history_keys에 있음)를 만남
+
+    (제목/링크가 없는 배너·공지성 행은 그냥 건너뛴다.)
+    """
+    for row in rows:
+        title_tag = row.find("a")
+        if not title_tag:
+            continue
+        title = " ".join(title_tag.stripped_strings) or title_tag.get_text(strip=True)
+        if not title:
+            continue
+
+        dates = find_all_dates_in_row(row.stripped_strings)
+        post_date = min(dates) if dates else None
+        if post_date and post_date < target_date_limit:
+            return True
+
+        if f"{org_name}|||{title}" in history_keys:
+            return True
+    return False
