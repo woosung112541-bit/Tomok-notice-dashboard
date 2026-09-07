@@ -1,19 +1,14 @@
 """
 engine.py
----------
-예전에는 '빠른/정밀/극한/주요4대' 라는 이름의 스크립트 4벌을 사람이 직접 골라야 했다.
-여기서는 그 선택을 없애고, 사이트 하나하나에 대해 시스템이 자동으로 다음 순서로
-시도한다 (제미나이 원칙 #1, #3을 그대로 코드화):
+-----------
+사이트 하나를 처리하는 로직(process_site)과, 여러 사이트를 병렬로 돌리는
+오케스트레이션(run_all_sites)을 담당한다.
 
-    1) custom  : site_registry가 'custom'으로 분류한 사이트는 전용 핸들러로 직행
-                 (KHNP, 아이건설넷처럼 로그인/팝업/다단계 클릭이 필요한 곳)
-    2) requests: 가볍고 빠른 1차 시도
-    3) selenium: requests에서 행을 하나도 못 찾았을 때만(=JS 렌더링 필요 가능성) 승격
-    4) manual  : selenium까지 실패하면 자동화를 포기하고 '수동 확인 목록'에 등록
-                 (조용히 실패하는 대신, 사람이 봐야 할 목록에 명시적으로 올린다)
-
-동시성: requests 사이트는 병렬 수를 높게, selenium(무거움)은 낮게 유지해서
-Streamlit Cloud 같은 자원이 제한된 환경에서 메모리 폭발을 막는다.
+단계적 자동 처리:
+1) custom (khnp, igunsul, d2b): 전용 핸들러 직행
+2) requests + discover_additional_boards: 네트워크 실패 시 selenium 재시도 스킵
+3) selenium: 행 카운트 반환
+4) 전부 실패 시: 사유별 분류(클라우드IP차단/조달청이관/구조문제) -> manual_check 탭
 """
 
 import concurrent.futures
@@ -133,17 +128,8 @@ def process_site(site: dict, target_date_limit, keywords: list[str], history_key
 
 def run_all_sites(all_sites: list[dict], target_date_limit, keywords: list[str],
                    history_keys: set | None = None) -> dict:
-    """
-    사이트 목록을 병렬로 처리한다. requests류와 selenium/custom류를 분리해서
-    서로 다른 동시성 수준으로 실행한다 (무거운 selenium을 과도하게 병렬로 띄우지 않기 위함).
-
-    처리 하나가 끝날 때마다 "PROGRESS:완료수:전체수" 형태의 줄을 stdout에 그대로 출력한다.
-    (로깅 포맷을 안 거치는 이유: app.py가 실시간으로 파싱해서 진행률 막대바를 그리기 때문에,
-    파싱하기 쉬운 단순한 고정 포맷이 필요하다.)
-
-    history_keys : 이미 저장된 notice_key 집합. 사이트별 페이지네이션을 몇 페이지나
-    따라갈지 판단하는 데 쓰인다 (scrapers.generic_requests/generic_selenium 참고).
-    """
+    """light(generic) 사이트는 넉넉한 스레드로, heavy(custom, 브라우저 직접 조작)
+    사이트는 적은 스레드로 병렬 처리한다."""
     history_keys = history_keys or set()
     light_sites = [s for s in all_sites if s["handler_type"] == "generic"]
     heavy_sites = [s for s in all_sites if s["handler_type"] == "custom"]

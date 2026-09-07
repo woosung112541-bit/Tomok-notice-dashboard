@@ -15,56 +15,41 @@ import github_actions
 
 KST = timezone(timedelta(hours=9))
 
-st.set_page_config(page_title="맞춤 공고 수집 대시보드", layout="wide")
+st.set_page_config(page_title="Tomok Notice Dashboard", page_icon="📋", layout="wide")
 
 
-# ==========================================
-# 🔐 대시보드 보안 자물쇠
-# ==========================================
 def check_password() -> bool:
-    if "password_correct" not in st.session_state:
-        st.session_state["password_correct"] = False
-    if not st.session_state["password_correct"]:
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.title("🔒 대시보드 보안 접속")
-            st.info("이 대시보드는 우리 팀원만 접근할 수 있습니다.\n\n발급받은 비밀번호를 입력해 주세요.")
-            pwd_input = st.text_input("🔑 비밀번호 입력", type="password")
-            if st.button("🚀 접속하기", use_container_width=True, type="primary"):
-                if pwd_input == config.DASHBOARD_PASSWORD:
-                    st.session_state["password_correct"] = True
-                    st.rerun()
-                else:
-                    st.error("🚫 비밀번호가 일치하지 않습니다.")
-        return False
-    return True
+    if not config.DASHBOARD_PASSWORD:
+        return True
+    if st.session_state.get("password_ok"):
+        return True
+    pw = st.text_input("비밀번호", type="password")
+    if pw == config.DASHBOARD_PASSWORD:
+        st.session_state["password_ok"] = True
+        st.rerun()
+    elif pw:
+        st.error("비밀번호가 틀렸습니다.")
+    return False
 
 
-if not check_password():
-    st.stop()
-
-# GOOGLE_CREDENTIALS 시크릿이 있으면 google_key.json으로 기록 (storage.py가 이 파일을 사용)
-storage.write_key_file_from_secret()
-
-
-@st.cache_data(ttl=60)
 def get_recent_log():
     try:
         _, doc = storage.connect()
-        ws = doc.worksheet(config.SHEET_SETTINGS)
-        eng = ws.cell(2, 1).value
-        tm = ws.cell(2, 2).value
-        return eng or "기록 없음", tm or "-"
+        run_info = github_actions.get_latest_run_status()
+        if run_info:
+            return run_info.get("status", "-"), run_info.get("created_at", "-")
     except Exception:
-        return "기록 없음", "-"
+        pass
+    return "-", "-"
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def get_google_sheet(sheet_name: str) -> pd.DataFrame:
     try:
         _, doc = storage.connect()
         ws = doc.worksheet(sheet_name)
-        return pd.DataFrame(ws.get_all_records())
+        records = ws.get_all_records()
+        return pd.DataFrame(records)
     except Exception:
         return pd.DataFrame()
 
@@ -73,30 +58,16 @@ def update_notice_status(notice_keys_to_mark, status_value) -> bool:
     try:
         _, doc = storage.connect()
         ws = doc.worksheet(config.SHEET_NOTICES)
-        all_records = ws.get_all_values()
-        if not all_records:
-            return True
-        headers = all_records[0]
-        if "검토유무" not in headers:
-            headers.append("검토유무")
-            ws.update(range_name="1:1", values=[headers])
-            review_col_idx = len(headers) - 1
-        else:
-            review_col_idx = headers.index("검토유무")
-        key_col_idx = headers.index("notice_key")
-
-        cells_to_update = []
-        for row_idx, row in enumerate(all_records):
-            if row_idx == 0:
-                continue
-            if len(row) <= review_col_idx:
-                row.extend([""] * (review_col_idx - len(row) + 1))
-            if row[key_col_idx] in notice_keys_to_mark:
-                cells_to_update.append(gspread.Cell(row=row_idx + 1, col=review_col_idx + 1, value=status_value))
-        if cells_to_update:
-            ws.update_cells(cells_to_update)
+        records = ws.get_all_records()
+        headers = ws.row_values(1)
+        status_col = headers.index("검토유무") + 1
+        key_col = headers.index("notice_key") + 1
+        for i, r in enumerate(records, start=2):
+            if str(r.get("notice_key", "")) in notice_keys_to_mark:
+                ws.update_cell(i, status_col, status_value)
         return True
-    except Exception:
+    except Exception as e:
+        st.error(f"상태 업데이트 실패: {e}")
         return False
 
 
@@ -154,64 +125,46 @@ def get_target_org_list():
 
 def render_notice_table(df: pd.DataFrame, key_prefix: str):
     if df.empty:
-        st.info("해당되는 공고가 없습니다.")
+        st.info("데이터가 없습니다.")
         return
 
-    display_columns = ["notice_key", "출처", "등록일", "공고제목", "특이사항", "검토유무", "상세링크"]
-    display_df = df[[c for c in display_columns if c in df.columns]].copy()
-    display_df.insert(0, "선택", False)
-
-    def highlight_row(row):
-        status = str(row.get("검토유무", "")).strip()
-        title_text = str(row.get("공고제목", ""))
-        special_text = str(row.get("특이사항", ""))
-        if status == "내업무아님":
-            return ["background-color: #8c8c8c; color: #ffffff; text-decoration: line-through;"] * len(row)
-        if status == "내업무맞음":
-            return ["background-color: #cce5ff; color: #004080; font-weight: bold;"] * len(row)
-        if status == "완료":
-            return ["background-color: #f0f2f6; color: #a0aab2;"] * len(row)
-        if "안전점검" in title_text or "안전점검" in special_text:
-            return ["background-color: #e6ffe6; color: #006600; font-weight: bold;"] * len(row)
-        return [""] * len(row)
-
-    styled_df = display_df.style.apply(highlight_row, axis=1)
-    disabled_cols = [c for c in display_df.columns if c != "선택"]
+    display_columns = ["출처", "등록일", "공고제목", "특이사항", "검토유무", "상세링크"]
+    show_df = df[[c for c in display_columns if c in df.columns]].copy()
+    show_df.insert(0, "선택", False)
 
     edited_df = st.data_editor(
-        styled_df,
+        show_df, hide_index=True, use_container_width=True, key=f"{key_prefix}_editor",
         column_config={
             "선택": st.column_config.CheckboxColumn("선택", required=True),
             "상세링크": st.column_config.LinkColumn("상세링크"),
-            "notice_key": None,
         },
-        disabled=disabled_cols, hide_index=True, use_container_width=True, key=f"editor_{key_prefix}",
+        disabled=[c for c in show_df.columns if c != "선택"],
     )
 
-    selected_keys = edited_df[edited_df["선택"]]["notice_key"].tolist() if "선택" in edited_df.columns else []
-    if selected_keys:
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            if st.button("👍 내 업무 맞음", key=f"{key_prefix}_ok", use_container_width=True):
-                if update_notice_status(selected_keys, "내업무맞음"):
-                    get_google_sheet.clear(); st.rerun()
-        with c2:
-            if st.button("👎 내 업무 아님", key=f"{key_prefix}_no", use_container_width=True):
-                if update_notice_status(selected_keys, "내업무아님"):
-                    get_google_sheet.clear(); st.rerun()
-        with c3:
-            if st.button("✅ 완료 처리", key=f"{key_prefix}_done", use_container_width=True):
-                if update_notice_status(selected_keys, "완료"):
-                    get_google_sheet.clear(); st.rerun()
-        with c4:
-            if st.button("↩️ 미검토로 되돌리기", key=f"{key_prefix}_undo", use_container_width=True):
-                if update_notice_status(selected_keys, "미검토"):
-                    get_google_sheet.clear(); st.rerun()
+    selected_indices = edited_df[edited_df["선택"]].index
+    selected_keys = df.loc[selected_indices, "notice_key"].tolist() if "notice_key" in df.columns else []
+
+    col1, col2, col3 = st.columns(3)
+    if col1.button("✅ 내 업무 맞음으로 표시", key=f"{key_prefix}_mark_yes"):
+        if selected_keys and update_notice_status(selected_keys, "내업무맞음"):
+            get_google_sheet.clear()
+            st.rerun()
+    if col2.button("❌ 내 업무 아님으로 표시", key=f"{key_prefix}_mark_no"):
+        if selected_keys and update_notice_status(selected_keys, "내업무아님"):
+            get_google_sheet.clear()
+            st.rerun()
+    if col3.button("↩️ 미검토로 되돌리기", key=f"{key_prefix}_mark_reset"):
+        if selected_keys and update_notice_status(selected_keys, "미검토"):
+            get_google_sheet.clear()
+            st.rerun()
 
 
 # ==========================================
-# 사이드바 메뉴
+# 로그인 체크
 # ==========================================
+if not check_password():
+    st.stop()
+
 st.sidebar.title("📌 메뉴 선택")
 menu = st.sidebar.radio(
     "이동할 메뉴를 선택하세요:",
@@ -239,11 +192,11 @@ st.sidebar.info(f"**최근 실행:** {last_engine}\n\n**시간:** {last_time}")
 if menu == "🔗 발주처 URL 관리":
     st.title("🔗 발주처 전용 URL (게시판 직행) 관리")
     st.info(
-        "💡 **로봇이 엑셀의 홈페이지 주소에서 고시공고 게시판을 찾지 못하는 경우, "
-        "이곳에 정확한 게시판 직통 URL을 등록해두세요!**\n\n"
-        "여기에 등록된 URL은 엑셀 주소보다 무조건 우선 적용됩니다."
+        "자동 탐색이 실패하거나 엉뚱한 페이지를 잡는 발주처는, 여기서 정확한 "
+        "게시판 URL을 직접 등록해두면 그 주소로 바로 수집합니다."
     )
 
+    org_list = get_target_org_list()
     base_dir = os.path.dirname(os.path.abspath(__file__))
     default_url_map = site_registry.get_org_default_url_map(base_dir)
 
@@ -251,58 +204,37 @@ if menu == "🔗 발주처 URL 관리":
     override_map = {}
     if not df_url.empty:
         for _, r in df_url.iterrows():
-            override_map[str(r.get("발주기관명", ""))] = {
-                "url": str(r.get("정확한_게시판_URL", "")),
-                "note": str(r.get("비고", "")),
-            }
+            override_map[str(r.get("발주기관명", ""))] = str(r.get("정확한_게시판_URL", ""))
 
     tab_edit, tab_add = st.tabs(["✏️ 등록된 발주처 수정", "➕ 새 발주처 추가"])
 
-    # ── 탭 1: 이미 명부에 등록된 발주처 중 하나를 '골라서' 수정 ──────────────────
     with tab_edit:
-        org_list = sorted(default_url_map.keys())
-        labeled_options = [
-            f"⭐ {name}" if name in override_map else name for name in org_list
-        ]
-        picked_label = st.selectbox("발주처 선택 (⭐ = 이미 직통 URL이 등록된 곳)", labeled_options)
-        picked_org = picked_label[2:] if picked_label.startswith("⭐ ") else picked_label
+        picked_org = st.selectbox("발주처 선택:", org_list, key="edit_org_picker")
+        current_url = override_map.get(picked_org, default_url_map.get(picked_org, ""))
+        st.caption(f"현재 사용 중인 주소: {current_url or '(등록된 주소 없음)'}")
 
-        current_override = override_map.get(picked_org)
-        current_url = current_override["url"] if current_override else default_url_map.get(picked_org, "")
-        current_note = current_override["note"] if current_override else ""
-
-        st.caption(f"현재 사용 중인 주소 ({'직통 URL 등록됨' if current_override else '명부 기본값'}):")
-        st.code(current_url or "(등록된 URL 없음)")
-
-        new_url = st.text_input("새 직통 URL", value=current_url, key="edit_url_input")
-        new_note = st.text_input("비고", value=current_note, key="edit_note_input")
+        new_url = st.text_input("새 URL", value=current_url, key="edit_url_input")
+        new_note = st.text_input("비고 (선택)", value="", key="edit_note_input")
 
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("💾 이 발주처에 저장", type="primary", use_container_width=True):
-                if not new_url.startswith("http"):
-                    st.error("URL은 http:// 또는 https:// 로 시작해야 합니다.")
-                else:
-                    try:
-                        _, doc = storage.connect()
-                        storage.upsert_url_override(doc, picked_org, new_url, new_note)
-                        get_google_sheet.clear()
-                        get_target_org_list.clear()
-                        st.success(f"✅ '{picked_org}' 직통 URL이 저장되었습니다.")
-                        time.sleep(1)
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"저장 중 오류: {e}")
+            if st.button("💾 이 URL로 저장", use_container_width=True):
+                try:
+                    _, doc = storage.connect()
+                    storage.upsert_url_override(doc, picked_org, new_url, new_note)
+                    get_google_sheet.clear()
+                    get_target_org_list.clear()
+                    st.success(f"✅ '{picked_org}' 직통 URL이 저장되었습니다.")
+                except Exception as e:
+                    st.error(f"저장 중 오류: {e}")
         with c2:
-            if current_override and st.button("↩️ 기본값으로 되돌리기 (오버라이드 삭제)", use_container_width=True):
+            if st.button("↩️ 기본값으로 되돌리기 (오버라이드 삭제)", use_container_width=True):
                 try:
                     _, doc = storage.connect()
                     storage.delete_url_override(doc, picked_org)
                     get_google_sheet.clear()
                     get_target_org_list.clear()
                     st.success(f"✅ '{picked_org}' 오버라이드가 삭제되었습니다. 명부 기본 URL로 되돌아갑니다.")
-                    time.sleep(1)
-                    st.rerun()
                 except Exception as e:
                     st.error(f"삭제 중 오류: {e}")
 
@@ -334,17 +266,12 @@ if menu == "🔗 발주처 URL 관리":
 
     # ── 탭 2: 명부에 아예 없는 새 발주처를 추가 (코드/엑셀 수정 없이 바로 수집 대상에 포함됨) ──
     with tab_add:
-        st.caption("여기서 추가한 발주처는 다음 수집부터 바로 대상에 포함됩니다 (코드/엑셀 수정 불필요).")
-        new_org_name = st.text_input("새 발주기관명", key="new_org_name")
-        new_org_url = st.text_input("게시판 직통 URL", key="new_org_url")
-        new_org_note = st.text_input("비고", key="new_org_note")
+        new_org_name = st.text_input("새 발주처명", key="new_org_name")
+        new_org_url = st.text_input("게시판 URL", key="new_org_url")
+        new_org_note = st.text_input("비고 (선택)", value="", key="new_org_note")
         if st.button("➕ 새 발주처 추가", type="primary"):
-            if not new_org_name.strip():
-                st.error("발주기관명을 입력해주세요.")
-            elif new_org_name.strip() in default_url_map or new_org_name.strip() in override_map:
-                st.error("이미 존재하는 발주기관명입니다. '등록된 발주처 수정' 탭에서 수정해주세요.")
-            elif not new_org_url.startswith("http"):
-                st.error("URL은 http:// 또는 https:// 로 시작해야 합니다.")
+            if not new_org_name.strip() or not new_org_url.strip():
+                st.warning("발주처명과 URL을 모두 입력해주세요.")
             else:
                 try:
                     _, doc = storage.connect()
@@ -352,8 +279,6 @@ if menu == "🔗 발주처 URL 관리":
                     get_google_sheet.clear()
                     get_target_org_list.clear()
                     st.success(f"✅ 새 발주처 '{new_org_name}'가 추가되었습니다.")
-                    time.sleep(1)
-                    st.rerun()
                 except Exception as e:
                     st.error(f"추가 중 오류: {e}")
 
@@ -401,245 +326,134 @@ elif menu == "🔍 실패 로그 분석":
     if df_manual.empty:
         st.success("현재 확인이 필요한 실패 항목이 없습니다.")
     else:
-        is_g2b_migrated = df_manual["사유"].astype(str).str.contains("나라장터로 별도 수집", na=False)
-        is_network_blocked = df_manual["사유"].astype(str).str.contains("클라우드 IP", na=False)
-        df_real = df_manual[~is_g2b_migrated & ~is_network_blocked]
-        df_network = df_manual[is_network_blocked]
-        df_g2b = df_manual[is_g2b_migrated]
-
-        st.markdown(f"#### 🔴 구조/셀렉터 확인이 필요한 발주처 ({len(df_real)}곳)")
-        if df_real.empty:
-            st.success("없습니다.")
-        else:
-            st.dataframe(df_real, use_container_width=True, hide_index=True,
-                         column_config={"URL": st.column_config.LinkColumn("URL")})
-
-        if not df_network.empty:
-            st.markdown(f"#### 🌐 접속 자체가 차단된 것으로 보이는 발주처 ({len(df_network)}곳)")
-            st.caption("셀렉터 문제가 아니라 서버 접속(타임아웃)부터 실패한 경우입니다. "
-                       "국내 IP 경유가 필요할 가능성이 높습니다 (하단 '수동 확인' 페이지 하단 안내 참고).")
-            st.dataframe(df_network, use_container_width=True, hide_index=True,
-                         column_config={"URL": st.column_config.LinkColumn("URL")})
-
-        if not df_g2b.empty:
-            st.markdown(f"#### ⚪ 조달청 이관 기관 - 참고용 ({len(df_g2b)}곳)")
-            st.caption("명부에 '조달청 이관' 표시가 된 기관들입니다. 나라장터 API로 별도 수집되고 있어 "
-                       "자체 게시판에 공고가 없는 게 정상일 가능성이 높습니다.")
-            st.dataframe(df_g2b, use_container_width=True, hide_index=True,
-                         column_config={"URL": st.column_config.LinkColumn("URL")})
+        is_g2b_migrated = df_manual["사유"].astype(str).str.contains("나라장터로", na=False)
+        st.subheader(f"⚠️ 실제 확인 필요 ({(~is_g2b_migrated).sum()}곳)")
+        st.dataframe(df_manual[~is_g2b_migrated], hide_index=True, use_container_width=True)
+        with st.expander(f"✅ 정상 (나라장터로 이관/연결됨) - {is_g2b_migrated.sum()}곳"):
+            st.dataframe(df_manual[is_g2b_migrated], hide_index=True, use_container_width=True)
 
     st.divider()
-    st.subheader("🪵 최근 실행 로그 (실패/경고)")
+    st.subheader("📜 전체 실행 로그 (run_log)")
     df_log = get_google_sheet(config.SHEET_RUN_LOG)
     if df_log.empty:
-        st.info("기록된 로그가 없습니다.")
+        st.info("아직 기록된 로그가 없습니다.")
     else:
-        proxy_notes = df_log[df_log["단계"] == "proxy_status"]
-        if not proxy_notes.empty:
-            last_proxy_note = proxy_notes.iloc[-1]
-            st.caption(f"🌐 가장 최근 실행의 프록시 상태: **{last_proxy_note['오류메시지']}** "
-                       f"({last_proxy_note['시각']})")
-        st.dataframe(df_log.tail(200), use_container_width=True, hide_index=True)
+        search_term = st.text_input("발주처/오류메시지 검색:", key="log_search")
+        show_log = df_log
+        if search_term:
+            mask = df_log.apply(lambda row: search_term in str(row.values), axis=1)
+            show_log = df_log[mask]
+        st.dataframe(show_log.iloc[::-1], hide_index=True, use_container_width=True)
+        st.download_button(
+            "⬇️ CSV로 다운로드",
+            show_log.to_csv(index=False).encode("utf-8-sig"),
+            file_name=f"{datetime.now(KST).strftime('%Y-%m-%dT%H-%M')}_run_log.csv",
+        )
 
 # ==========================================
 # 공고 자동수집
 # ==========================================
 elif menu == "공고 자동수집":
-    st.title("🚀 공고 자동 수집 & 실시간 검색")
+    st.title("📋 공고 자동수집")
 
-    with st.container(border=True):
-        st.subheader("⚙️ 수집 기본 설정")
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            collect_days = st.number_input("수집 기간 (0입력 시, 당일만 수집)", min_value=0, max_value=365, value=0, step=1)
-        with col2:
-            collect_keywords = st.text_input("🔑 수집 키워드 (쉼표 구분)", value=", ".join(config.DEFAULT_KEYWORDS))
+    col_days, col_kw = st.columns([1, 2])
+    with col_days:
+        collect_days = st.number_input("🗓️ 수집 기간 (최근 며칠)", min_value=0, max_value=90, value=config.DEFAULT_DAYS_AGO)
+    with col_kw:
+        collect_keywords = st.text_input("🔑 수집 키워드 (쉼표 구분)", value=", ".join(config.DEFAULT_KEYWORDS))
 
-        st.divider()
-        st.subheader("🎯 타겟 발주처 설정")
-        scan_mode = st.toggle("✅ 전수조사 (모든 등록 기관 스캔)", value=True)
+    scan_mode = st.toggle("🌐 전수조사 (모든 등록 기관 스캔)", value=True)
+    selected_orgs_str = "ALL"
+    if not scan_mode:
+        org_list = get_target_org_list()
+        selected_orgs = st.multiselect("탐색할 특정 발주처를 선택하세요:", org_list, placeholder="기관명을 검색하거나 선택하세요...")
+        if not selected_orgs:
+            st.warning("발주처를 하나 이상 선택해주세요.")
+        else:
+            selected_orgs_str = ",".join(selected_orgs)
 
-        selected_orgs_str = "ALL"
-        if not scan_mode:
-            org_list = get_target_org_list()
-            selected_orgs = st.multiselect("탐색할 특정 발주처를 선택하세요:", org_list, placeholder="기관명을 검색하거나 선택하세요...")
-            if not selected_orgs:
-                st.warning("⚠️ 최소 1개 이상의 발주처를 선택해야 합니다.")
-            else:
-                selected_orgs_str = ",".join(selected_orgs)
-
-        st.caption(
-            "ℹ️ 사이트별 수집 방식(requests / selenium / 전용 로직)은 시스템이 자동으로 결정합니다. "
-            "더 이상 엔진을 직접 고를 필요가 없습니다."
-        )
-
-        use_proxy = st.toggle("🌐 무료 프록시로 우회 시도 (실험적)", value=False)
-        if use_proxy:
-            st.caption(
-                "⚠️ 무료 공개 프록시를 매번 새로 찾아 시도합니다. **작동을 보장하지 않습니다** — "
-                "살아있는 국내(KR) 프록시가 없으면 자동으로 프록시 없이 진행되고, 그 여부는 "
-                "실행 로그 맨 위 '[프록시]'로 시작하는 줄에서 확인할 수 있습니다. 확실한 우회가 "
-                "필요하면 아래 '사무실 PC로 수집'이 더 안정적입니다."
-            )
-
-        st.divider()
-        col_run1, col_run2 = st.columns(2)
-
-        # ── 버튼 1: 지금 바로 (Streamlit Cloud에서 직접 실행) ──────────────────
-        with col_run1:
-            run_now_clicked = st.button("🚀 지금 바로 수집 (클라우드)", type="primary", use_container_width=True)
-            st.caption("빠르지만, 일부 사이트는 클라우드 IP를 차단해서 못 잡을 수 있음 (약 80~85%)")
-
-        # ── 버튼 2: 사무실 PC(GitHub Actions 셀프호스팅 러너)에게 맡기기 ─────────
-        with col_run2:
-            github_ready = github_actions.is_configured()
-            run_office_clicked = st.button(
-                "🏢 사무실 PC로 확실하게 수집", use_container_width=True,
-                disabled=not github_ready,
-                help=None if github_ready else "GITHUB_TOKEN / GITHUB_REPO 시크릿을 등록하면 활성화됩니다.",
-            )
-            st.caption("느리지만(사무실 PC가 켜져 있어야 함), 클라우드 IP 차단을 대부분 우회함")
-
-        if run_now_clicked:
-            if not scan_mode and selected_orgs_str == "ALL":
-                st.error("특정 발주처 선택 모드입니다. 기관을 선택해주세요.")
-            else:
-                try:
-                    _, doc = storage.connect()
-                except storage.SheetUnavailable as e:
-                    st.error(f"구글 시트 연결 실패: {e}")
-                    doc = None
-
-                if doc is not None:
-                    if storage.manage_sheet_lock(doc, "check"):
-                        _render_stuck_lock_warning(doc, "cloud")
-                    else:
-                        progress_bar = st.progress(0, text="수집 준비 중...")
-                        with st.status("🚀 수집 엔진 가동 중...", expanded=True) as status:
-                            try:
-                                get_recent_log.clear()
-
-                                process = subprocess.Popen(
-                                    [sys.executable, "-u", "main.py", str(collect_days), collect_keywords,
-                                     selected_orgs_str, "1" if use_proxy else "0"],
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                    encoding="utf-8", bufsize=1,
-                                )
-                                for raw_line in iter(process.stdout.readline, ""):
-                                    if not raw_line:
-                                        continue
-                                    line = raw_line.strip()
-                                    # engine.py가 사이트 하나 처리를 끝낼 때마다 찍는 진행률 마커.
-                                    # 로그 포맷("[시각] [INFO] ...")과 섞이지 않도록 별도의 단순한
-                                    # "PROGRESS:완료수:전체수" 줄로 내려오며, 여기서만 파싱해서
-                                    # 막대바를 갱신하고 일반 로그 창에는 출력하지 않는다.
-                                    if line.startswith("PROGRESS:"):
-                                        try:
-                                            _, done_str, total_str = line.split(":")
-                                            done, total = int(done_str), int(total_str)
-                                            pct = min(done / total, 1.0) if total else 0.0
-                                            progress_bar.progress(pct, text=f"{done}/{total}곳 처리 완료 ({int(pct * 100)}%)")
-                                        except (ValueError, ZeroDivisionError):
-                                            pass
-                                    else:
-                                        st.write(line)
-                                process.wait()
-
-                                if process.returncode == 0:
-                                    progress_bar.progress(1.0, text="✅ 전체 완료 (100%)")
-                                    status.update(label="✅ 공고 수집 완료!", state="complete", expanded=False)
-                                    get_google_sheet.clear()
-                                else:
-                                    status.update(label="❌ 수집 실패 (로그 확인 필요)", state="error", expanded=True)
-                            except Exception as e:
-                                status.update(label=f"❌ 시스템 오류: {e}", state="error", expanded=True)
-                            # 잠금 해제는 main.py가 자체적으로 처리한다 (Streamlit/GitHub Actions
-                            # 어느 경로로 실행되든 동일하게 잠기고 풀리도록 하기 위함).
-                        st.rerun()
-
-        if run_office_clicked:
-            if not scan_mode and selected_orgs_str == "ALL":
-                st.error("특정 발주처 선택 모드입니다. 기관을 선택해주세요.")
-            else:
-                try:
-                    _, doc = storage.connect()
-                    already_running = storage.manage_sheet_lock(doc, "check")
-                except Exception:
-                    already_running = False  # 확인 실패해도 요청 자체는 시도해본다
-
-                if already_running:
-                    _render_stuck_lock_warning(doc, "office")
-                else:
-                    ok, msg = github_actions.dispatch_workflow(
-                        collect_days, collect_keywords, selected_orgs_str, use_proxy,
-                        ref=config.GITHUB_BRANCH,
-                    )
-                    if ok:
-                        st.success(f"✅ {msg} 사무실 PC가 켜져 있으면 잠시 후 시작됩니다. "
-                                   "아래에서 진행 상태를 확인하거나, GitHub Actions 페이지에서 실시간 로그를 볼 수 있습니다.")
-                    else:
-                        st.error(f"❌ 요청 실패: {msg}")
-
-        if github_ready:
-            with st.expander("🏢 사무실 PC(GitHub Actions) 최근 실행 상태", expanded=run_office_clicked):
-                if st.button("🔄 상태 새로고침"):
-                    st.rerun()
-                run_info = github_actions.get_latest_run()
-                if not run_info:
-                    st.info("아직 실행 기록이 없거나 상태를 가져오지 못했습니다.")
-                else:
-                    status_map = {"queued": "⏳ 대기 중", "in_progress": "🏃 실행 중", "completed": "완료됨"}
-                    conclusion_map = {"success": "✅ 성공", "failure": "❌ 실패", None: ""}
-                    label = status_map.get(run_info["status"], run_info["status"])
-                    if run_info["status"] == "completed":
-                        label += f" - {conclusion_map.get(run_info['conclusion'], run_info['conclusion'])}"
-                    st.write(f"**상태**: {label}  \n**시작 시각**: {run_info['created_at']}")
-                    st.link_button("GitHub Actions에서 실시간 로그 보기", run_info["html_url"])
+    use_proxy = st.toggle("🧪 무료 프록시로 우회 시도 (실험적, 국내 IP 차단 사이트용)", value=False)
 
     st.divider()
+    col_cloud, col_office = st.columns(2)
 
-    df = get_google_sheet(config.SHEET_NOTICES)
-    if not df.empty and "공고제목" in df.columns:
-        if "검토유무" not in df.columns:
-            df["검토유무"] = "미검토"
+    with col_cloud:
+        st.subheader("🚀 지금 바로 수집 (클라우드)")
+        st.caption("이 화면에서 직접 실행합니다. 실시간 로그가 아래에 표시됩니다.")
+        if st.button("🚀 지금 바로 수집 시작", type="primary", use_container_width=True):
+            if not scan_mode and selected_orgs_str == "ALL":
+                st.error("발주처를 선택해주세요.")
+            else:
+                try:
+                    _, doc = storage.connect()
+                except Exception:
+                    doc = None
+                if doc is not None and storage.manage_sheet_lock(doc, "check"):
+                    _render_stuck_lock_warning(doc, "cloud")
+                else:
+                    progress_bar = st.progress(0)
+                    log_box = st.empty()
+                    log_lines = []
+                    process = subprocess.Popen(
+                        [sys.executable, "-u", "main.py", str(collect_days), collect_keywords,
+                         selected_orgs_str, "1" if use_proxy else "0"],
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                        encoding="utf-8", bufsize=1,
+                    )
+                    for raw_line in iter(process.stdout.readline, ""):
+                        if not raw_line:
+                            continue
+                        line = raw_line.strip()
+                        if line.startswith("PROGRESS:"):
+                            try:
+                                done, total = line.split(":")[1:3]
+                                progress_bar.progress(min(int(done) / max(int(total), 1), 1.0))
+                            except Exception:
+                                pass
+                        else:
+                            log_lines.append(line)
+                            log_box.code("\n".join(log_lines[-40:]))
+                    process.wait()
+                    get_google_sheet.clear()
+                    st.success("✅ 수집이 완료되었습니다.")
 
-        st.sidebar.subheader("🔍 공고 실시간 검색")
-        search_keyword = st.sidebar.text_input("공고제목 / 특이사항 검색", "")
-        search_org = st.sidebar.text_input("발주기관(출처) 검색", "")
-        hide_reviewed = st.sidebar.checkbox("✅ 검토 완료된 공고 숨기기", value=True)
+    with col_office:
+        st.subheader("🏢 사무실 PC로 확실하게 수집")
+        st.caption("GitHub Actions를 통해 대전 사무실 PC(실제 국내 IP)에서 실행합니다. 비동기로 진행되며, 완료까지 몇 분 걸릴 수 있습니다.")
+        if not config.GITHUB_TOKEN or not config.GITHUB_REPO:
+            st.info("GITHUB_TOKEN / GITHUB_REPO 시크릿이 설정되지 않아 이 버튼은 비활성화되어 있습니다.")
+        else:
+            already_running = False
+            doc = None
+            try:
+                _, doc = storage.connect()
+                already_running = storage.manage_sheet_lock(doc, "check")
+            except Exception:
+                already_running = False  # 확인 실패해도 요청 자체는 시도해본다
 
-        filtered_df = df.copy()
-        if hide_reviewed:
-            filtered_df = filtered_df[~filtered_df["검토유무"].isin(["완료", "내업무아님", "내업무맞음"])]
-        if search_keyword:
-            filtered_df = filtered_df[
-                filtered_df["공고제목"].astype(str).str.contains(search_keyword, case=False, na=False)
-                | filtered_df["특이사항"].astype(str).str.contains(search_keyword, case=False, na=False)
-            ]
-        if search_org:
-            filtered_df = filtered_df[filtered_df["출처"].astype(str).str.contains(search_org, case=False, na=False)]
+            if already_running:
+                _render_stuck_lock_warning(doc, "office")
+            else:
+                if st.button("🏢 사무실 PC로 수집 시작", use_container_width=True):
+                    if not scan_mode and selected_orgs_str == "ALL":
+                        st.error("발주처를 선택해주세요.")
+                    else:
+                        ok = github_actions.dispatch_workflow(
+                            str(collect_days), collect_keywords, selected_orgs_str, "1" if use_proxy else "0")
+                        if ok:
+                            st.success("✅ 사무실 PC로 실행 요청을 보냈습니다. GitHub Actions에서 진행 상황을 확인하세요.")
+                        else:
+                            st.error("❌ 요청 전송에 실패했습니다. GITHUB_TOKEN 권한을 확인해주세요.")
 
-        col_btn1, col_btn2 = st.columns([3, 1])
-        with col_btn2:
-            if st.button("✅ 현재 화면 전체 일괄 검토완료", use_container_width=True):
-                keys_to_mark = filtered_df["notice_key"].tolist()
-                if keys_to_mark and update_notice_status(keys_to_mark, "완료"):
-                    get_google_sheet.clear(); st.rerun()
-
-        main_sites_keywords = ["한국시설안전협회", "조달청", "아이건설넷", "나라장터"]
-        df_main = filtered_df[filtered_df["출처"].str.contains("|".join(main_sites_keywords), na=False)]
-        df_general = filtered_df[~filtered_df["출처"].str.contains("|".join(main_sites_keywords), na=False)]
-
-        st.subheader(f"📋 일반 기관 공고 ({len(df_general)}건)")
-        render_notice_table(df_general, "general")
-        st.divider()
-        st.subheader(f"🌟 주요 4대 중앙 공고 ({len(df_main)}건)")
-        render_notice_table(df_main, "main_site")
-    else:
-        st.info("아직 구글 시트에 수집된 데이터가 없습니다.")
+            run_info = github_actions.get_latest_run_status()
+            if run_info:
+                status_kor = {"completed": "완료", "in_progress": "진행 중", "queued": "대기 중"}.get(run_info["status"], run_info["status"])
+                conclusion_kor = {"success": "✅ 성공", "failure": "❌ 실패", None: "-"}.get(run_info["conclusion"], run_info["conclusion"])
+                st.write(f"**상태**: {status_kor} / {conclusion_kor}  \n**시작 시각**: {run_info['created_at']}")
+                st.link_button("GitHub Actions에서 실시간 로그 보기", run_info["html_url"])
 
 # ==========================================
-# 기타 메뉴 (원본과 동일하게 자리만 유지 - 필요 시 후속 확장)
+# 공고 통계 및 분석
 # ==========================================
 elif menu == "공고 통계 및 분석":
     st.title("📊 공고 통계 및 분석 대시보드")
@@ -687,6 +501,10 @@ elif menu == "공고 통계 및 분석":
                 st.caption("수동확인 사유별 분류는 '🔍 실패 로그 분석' 화면에서 더 자세히 볼 수 있습니다.")
         except Exception:
             st.caption("발주처 현황 시트를 아직 불러올 수 없습니다.")
+
+# ==========================================
+# 🎯 타겟 공고 (내 업무)
+# ==========================================
 elif menu == "🎯 타겟 공고 (내 업무)":
     st.title("🎯 수동 분류된 '내 업무' 공고 리스트")
     df = get_google_sheet(config.SHEET_NOTICES)
@@ -694,6 +512,10 @@ elif menu == "🎯 타겟 공고 (내 업무)":
         render_notice_table(df[df["검토유무"] == "내업무맞음"], "target_work")
     else:
         st.info("데이터가 없습니다.")
+
+# ==========================================
+# 🚫 자동 제외된 공고
+# ==========================================
 elif menu == "🚫 자동 제외된 공고":
     st.title("🚫 자동 제외된 공고")
     st.caption(
@@ -712,6 +534,10 @@ elif menu == "🚫 자동 제외된 공고":
             show_df, hide_index=True, use_container_width=True,
             column_config={"상세링크": st.column_config.LinkColumn("상세링크")},
         )
+
+# ==========================================
+# 🗒️ 전수조사 로그 (AI 분석용)
+# ==========================================
 elif menu == "🗒️ 전수조사 로그 (AI 분석용)":
     st.title("🗒️ 전수조사 로그 (AI 분석용)")
     st.caption(
@@ -766,6 +592,9 @@ elif menu == "🗒️ 전수조사 로그 (AI 분석용)":
             lines.append(line)
         st.code("\n".join(lines), language=None)
 
+# ==========================================
+# 📝 게시판 / 메모장
+# ==========================================
 elif menu == "📝 게시판 / 메모장":
     st.title("📝 팀 게시판 및 메모장")
     st.caption("팀원들과 공유할 메모나 특이사항을 남겨두는 공간입니다. 구글시트에 저장되어 접속하는 모두에게 보입니다.")

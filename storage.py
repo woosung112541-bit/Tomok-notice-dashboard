@@ -1,89 +1,120 @@
 """
 storage.py
-----------
-구글 시트(gspread) 관련 로직을 한 곳에 모은다.
-app.py와 main.py 양쪽에서 이 모듈만 사용하고, gspread를 직접 다루지 않는다.
-
-시트 구성 (config.py의 SHEET_* 참고):
-  notices        : 수집된 공고 원장
-  collected_orgs : 이번까지 한 번이라도 공고가 발견된 발주처 이름 집합
-  empty_orgs     : 이번 실행에서 공고가 없었거나 실패한 발주처
-  url_overrides  : 담당자가 직접 관리하는 '실제 게시판 직통 URL' 매핑
-  settings       : 동시 실행 방지 락 + 최근 실행 기록
-  run_log        : (신규) 실행 중 발생한 실패/경고 로그
-  manual_check   : (신규) 자동화가 어렵다고 판단되어 수동 확인이 필요한 발주처 목록
+------------
+구글시트를 데이터 백엔드로 쓰는 모든 읽기/쓰기 로직을 여기 모아둔다.
 """
 
+import json
 import time
 from datetime import datetime, timezone, timedelta
 
 import gspread
+from google.oauth2.service_account import Credentials
 
 import config
 
 KST = timezone(timedelta(hours=9))
+KEY_FILE_PATH = "google_key.json"
+LOCK_STALE_SECONDS = 900  # 15분 - 이보다 오래 'running' 상태면 죽은 잠금으로 간주하고 풀어준다
 
 
 class SheetUnavailable(Exception):
-    """구글 시트에 연결할 수 없을 때 발생시키는 예외. main.py에서 명확히 처리하기 위함."""
+    pass
 
 
 def write_key_file_from_secret() -> None:
-    """GOOGLE_CREDENTIALS 시크릿이 있으면 google_key.json으로 기록한다.
-    (app.py, main.py 양쪽에서 실행 시작 시 한 번 호출)"""
-    val = config.get_secret("GOOGLE_CREDENTIALS")
-    if val:
-        with open(config.GOOGLE_KEY_FILE, "w", encoding="utf-8") as f:
-            f.write(val)
+    """config.GOOGLE_CREDENTIALS(JSON 문자열)를 google_key.json 파일로 저장한다.
+    Streamlit Cloud처럼 파일 시스템에 미리 키 파일이 없는 환경에서 필요하다.
+    GitHub Actions 쪽은 워크플로우 자체에서 이미 파일을 만들어주므로, 이미 파일이
+    있으면 건드리지 않는다."""
+    import os
+    if os.path.exists(KEY_FILE_PATH):
+        return
+    if not config.GOOGLE_CREDENTIALS:
+        return
+    with open(KEY_FILE_PATH, "w", encoding="utf-8") as f:
+        f.write(config.GOOGLE_CREDENTIALS)
 
 
 def connect():
-    """gspread 클라이언트 + 문서 핸들을 반환한다. 실패 시 SheetUnavailable을 발생시킨다."""
+    """구글시트에 연결한다. 반환: (gspread client, 스프레드시트 문서 객체)."""
     try:
-        gc = gspread.service_account(filename=config.GOOGLE_KEY_FILE)
-        doc = gc.open(config.GOOGLE_SHEET_NAME)
+        scopes = ["https://www.googleapis.com/auth/spreadsheets",
+                  "https://www.googleapis.com/auth/drive"]
+        creds = Credentials.from_service_account_file(KEY_FILE_PATH, scopes=scopes)
+        gc = gspread.authorize(creds)
+        doc = gc.open("Tomok-notice-dashboard-data")
         return gc, doc
     except Exception as e:
-        raise SheetUnavailable(f"구글 시트 연결 실패: {e}") from e
+        raise SheetUnavailable(str(e))
 
 
 def _get_or_create_worksheet(doc, title: str, headers: list[str] | None = None):
     try:
-        return doc.worksheet(title)
+        ws = doc.worksheet(title)
     except gspread.exceptions.WorksheetNotFound:
-        ws = doc.add_worksheet(title=title, rows=1000, cols=max(10, len(headers or []) + 2))
+        ws = doc.add_worksheet(title=title, rows=1000, cols=max(len(headers or []), 10))
         if headers:
-            ws.update(range_name="1:1", values=[headers])
-        return ws
+            ws.append_row(headers)
+    return ws
 
 
-def load_run_context(doc):
-    """수집 실행 전, 중복 방지를 위한 기존 데이터(공고 key, 이미 확인된 발주처, URL 오버라이드)를 불러온다."""
-    ws_notices = doc.worksheet(config.SHEET_NOTICES)
-    ws_collected = doc.worksheet(config.SHEET_COLLECTED_ORGS)
+def manage_sheet_lock(doc, action: str, engine_name: str = "통합 엔진") -> bool:
+    """settings 탭 A1(상태)/B1(시각)/C1(엔진명)으로 간단한 락을 관리한다.
+    action: "check" (현재 잠겨있는지 bool 반환), "lock_and_log" (잠그기), "unlock" (풀기).
+    15분 넘게 'running'이면 죽은 락으로 간주하고 자동으로 풀어준다 (GitHub Actions에서
+    '취소'를 누르면 프로세스가 강제 종료되면서 unlock 코드가 실행될 기회 없이 죽어서,
+    이 안전장치 없이는 영영 잠긴 채로 남는 문제가 있었다)."""
+    ws = _get_or_create_worksheet(doc, config.SHEET_SETTINGS, ["status", "locked_at", "engine"])
+    values = ws.get_all_values()
+    status = values[0][0] if values and len(values[0]) > 0 else "free"
+    locked_at_str = values[0][1] if values and len(values[0]) > 1 else ""
 
-    existing_notices = ws_notices.get_all_records()
-    history_keys = {str(row.get("notice_key", "")) for row in existing_notices}
+    is_stale = False
+    if status == "running" and locked_at_str:
+        try:
+            locked_at = datetime.strptime(locked_at_str, "%Y-%m-%d %H:%M:%S")
+            if (datetime.now(KST).replace(tzinfo=None) - locked_at).total_seconds() > LOCK_STALE_SECONDS:
+                is_stale = True
+        except ValueError:
+            is_stale = True
 
-    existing_collected = ws_collected.get_all_records()
-    collected_orgs = {str(row.get("org_name", "")) for row in existing_collected if str(row.get("org_name", ""))}
+    if action == "check":
+        return status == "running" and not is_stale
 
+    if action == "lock_and_log":
+        ws.update(range_name="A1:C1", values=[["running", datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"), engine_name]])
+        return True
+
+    if action == "unlock":
+        ws.update(range_name="A1:C1", values=[["free", "", ""]])
+        return True
+
+    return False
+
+
+def load_run_context(doc) -> dict:
+    """notices/collected_orgs 워크시트 핸들과, 이미 알고 있는 notice_key 집합(history_keys),
+    url_overrides(발주처명 -> URL)를 한 번에 불러온다."""
+    ws_notices = _get_or_create_worksheet(
+        doc, config.SHEET_NOTICES,
+        ["출처", "등록일", "공고제목", "상세링크", "notice_key", "수집시각", "특이사항", "검토유무"])
+    ws_collected = _get_or_create_worksheet(doc, config.SHEET_COLLECTED_ORGS, ["발주처", "최근수집시각"])
+
+    history_keys = {str(r.get("notice_key", "")) for r in ws_notices.get_all_records()}
+
+    ws_overrides = _get_or_create_worksheet(doc, config.SHEET_URL_OVERRIDES, ["발주기관명", "정확한_게시판_URL", "비고"])
     url_overrides = {}
-    try:
-        ws_urls = doc.worksheet(config.SHEET_URL_OVERRIDES)
-        for r in ws_urls.get_all_records():
-            org = str(r.get("발주기관명", "")).strip()
-            url_val = str(r.get("정확한_게시판_URL", "")).strip()
-            if org and url_val.startswith("http"):
-                url_overrides[org] = url_val
-    except Exception:
-        pass  # url_overrides 탭이 없어도 정상 동작해야 하므로 여기만 예외적으로 조용히 넘어감
+    for r in ws_overrides.get_all_records():
+        name = str(r.get("발주기관명", "")).strip()
+        url = str(r.get("정확한_게시판_URL", "")).strip()
+        if name and url:
+            url_overrides[name] = url
 
     return {
         "ws_notices": ws_notices,
         "ws_collected": ws_collected,
         "history_keys": history_keys,
-        "collected_orgs": collected_orgs,
         "url_overrides": url_overrides,
     }
 
@@ -134,22 +165,22 @@ def append_excluded_notices(doc, items: list[dict], history_keys: set, current_t
 
 
 def append_collected_orgs(ws_collected, org_names: set) -> None:
+    """이번 실행에서 정상적으로 공고를 수집한 발주처 목록을 기록한다 (최근수집시각 갱신)."""
     if not org_names:
         return
-    existing = {str(r.get("org_name", "")) for r in ws_collected.get_all_records()}
-    rows = [[name] for name in org_names if name not in existing]
-    if rows:
-        ws_collected.append_rows(rows)
-
-
-def write_run_log(doc, run_log_entries: list[dict]) -> None:
-    """이번 실행에서 발생한 실패/경고 로그를 run_log 탭에 남긴다."""
-    if not run_log_entries:
-        return
-    headers = ["시각", "발주처", "URL", "단계", "오류유형", "오류메시지"]
-    ws = _get_or_create_worksheet(doc, config.SHEET_RUN_LOG, headers)
-    rows = [[e.get(h, "") for h in headers] for e in run_log_entries]
-    ws.append_rows(rows)
+    now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+    existing = ws_collected.get_all_records()
+    existing_names = {str(r.get("발주처", "")) for r in existing}
+    new_rows = [[name, now_str] for name in org_names if name not in existing_names]
+    if new_rows:
+        ws_collected.append_rows(new_rows)
+    # 이미 있던 발주처는 시각만 갱신 (행 전체를 다시 쓰는 대신, 간단히 재기록)
+    updated_names = org_names & existing_names
+    if updated_names:
+        all_values = ws_collected.get_all_values()
+        for i, row in enumerate(all_values[1:], start=2):
+            if row and row[0] in updated_names:
+                ws_collected.update(range_name=f"B{i}", values=[[now_str]])
 
 
 def write_manual_check_list(doc, manual_items: list[dict]) -> None:
@@ -161,6 +192,17 @@ def write_manual_check_list(doc, manual_items: list[dict]) -> None:
     rows = [[m.get(h, "") for h in headers] for m in manual_items]
     ws.clear()
     ws.update(range_name="1:1", values=[headers])
+    ws.append_rows(rows)
+
+
+def write_run_log(doc, run_log: list[dict]) -> None:
+    """이번 실행에서 쌓인 실패/경고/시스템 로그(utils.logging_setup.RUN_LOG)를
+    run_log 탭에 append한다."""
+    if not run_log:
+        return
+    headers = ["시각", "발주처", "URL", "단계", "오류유형", "오류메시지"]
+    ws = _get_or_create_worksheet(doc, config.SHEET_RUN_LOG, headers)
+    rows = [[r.get(h, "") for h in headers] for r in run_log]
     ws.append_rows(rows)
 
 
@@ -218,54 +260,27 @@ def upsert_url_override(doc, org_name: str, url: str, note: str = "") -> None:
     ws = _get_or_create_worksheet(doc, config.SHEET_URL_OVERRIDES, headers)
     records = ws.get_all_values()
     if not records:
-        ws.update(range_name="1:1", values=[headers])
+        ws.append_row(headers)
         records = [headers]
 
-    for i, row in enumerate(records[1:], start=2):  # 1행은 헤더
+    target_row = None
+    for i, row in enumerate(records[1:], start=2):
         if row and row[0] == org_name:
-            ws.update(range_name=f"A{i}:C{i}", values=[[org_name, url, note]])
-            return
-    ws.append_rows([[org_name, url, note]])
+            target_row = i
+            break
+
+    if target_row:
+        ws.update(range_name=f"A{target_row}:C{target_row}", values=[[org_name, url, note]])
+    else:
+        ws.append_row([org_name, url, note])
 
 
 def delete_url_override(doc, org_name: str) -> None:
-    """특정 발주처의 URL 오버라이드를 삭제한다 (등록명부의 기본 URL로 되돌아감)."""
+    """특정 발주처의 오버라이드 행을 통째로 삭제한다 (명부 기본 URL로 되돌아감)."""
     ws = _get_or_create_worksheet(doc, config.SHEET_URL_OVERRIDES, ["발주기관명", "정확한_게시판_URL", "비고"])
-    records = ws.get_all_values()
-    for i, row in enumerate(records[1:], start=2):
-        if row and row[0] == org_name:
-            ws.delete_rows(i)
-            return
-
-
-# ── 대시보드 동시 실행 방지 락 ─────────────────────────────────────────────────
-def manage_sheet_lock(doc, action: str = "check", engine_name: str = "") -> bool:
-    """
-    action: 'check' | 'lock_and_log' | 'unlock'
-    settings 시트 A1=상태(free/running), B1=timestamp, A2=마지막 실행 이름, B2=마지막 실행 시각
-    """
     try:
-        ws = _get_or_create_worksheet(doc, config.SHEET_SETTINGS)
-        if ws.cell(1, 1).value is None:
-            ws.update(range_name="A1:B1", values=[["free", str(time.time())]])
-
-        if action == "check":
-            status = ws.cell(1, 1).value
-            timestamp = ws.cell(1, 2).value
-            if status == "running":
-                # 15분 이상 지나면 죽은 락으로 간주하고 해제 (프로세스가 비정상 종료된 경우 대비)
-                if timestamp and time.time() - float(timestamp) > 900:
-                    ws.update(range_name="A1:B1", values=[["free", str(time.time())]])
-                    return False
-                return True
-            return False
-        elif action == "lock_and_log":
-            ws.update(range_name="A1:B2", values=[
-                ["running", str(time.time())],
-                [engine_name, datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")],
-            ])
-        elif action == "unlock":
-            ws.update(range_name="A1:B1", values=[["free", str(time.time())]])
-        return False
-    except Exception:
-        return False
+        cell = ws.find(org_name, in_column=1)
+    except gspread.exceptions.CellNotFound:
+        cell = None
+    if cell:
+        ws.delete_rows(cell.row)
