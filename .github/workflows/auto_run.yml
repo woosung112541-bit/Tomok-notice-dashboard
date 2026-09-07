@@ -10,7 +10,7 @@ on:
       keywords:
         description: "쉼표로 구분한 키워드"
         required: false
-        default: "모집,안전,공고,진단,정밀"
+        default: "모집,안전,공고,진단,정밀,점검,성능,수행"
       target_orgs:
         description: "특정 발주처만 (콤마 구분) 또는 ALL"
         required: false
@@ -69,7 +69,7 @@ jobs:
           RUN_KEYWORDS: ${{ inputs.keywords }}
           RUN_TARGET_ORGS: ${{ inputs.target_orgs }}
           RUN_USE_PROXY: ${{ inputs.use_proxy }}
-          # 파이썬이 콘솔(=실행 로그)에 한글을 출력할 때도 cp949로 잘못 해석해서
+          # 파이썬이 콘솔(실행 로그)에 한글을 출력할 때도 cp949로 잘못 해석해서
           # 깨지거나 UnicodeEncodeError가 나는 문제가 있었다 - 파이썬 자체
           # 입출력을 강제로 UTF-8로 고정해서 방지한다.
           PYTHONUTF8: "1"
