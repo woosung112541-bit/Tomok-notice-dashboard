@@ -256,12 +256,45 @@ def discover_additional_boards(base_url: str, domain: str) -> list[str]:
 
 
 def select_rows(soup: BeautifulSoup):
-    """공통 셀렉터 목록을 순서대로 시도해 첫 번째로 매치되는 행 목록을 반환."""
+    """공통 셀렉터 목록을 순서대로 시도해 첫 번째로 매치되는 행 목록을 반환.
+
+    그래도 못 찾으면 '펼쳐진 li형' 특수 구조(예: 낙동강유역환경청 등 mcee.go.kr
+    계열, 구 환경부 산하기관)를 시도한다 - 이런 사이트는 번호/제목/등록자/날짜/
+    조회수가 각각 독립된 형제 <li>로 나란히 펼쳐져 있고, 이를 하나로 묶는 상위
+    태그(<tr>/<li> 등)가 없다. <li class="title">(제목 칸에는 이 클래스가 붙어있는
+    걸 실제 화면으로 확인함)를 기준점 삼아, 바로 앞 형제 1개(번호)와 다음
+    li.title이 나오기 전까지의 뒤쪽 형제들(등록자/날짜/조회수 등, 사이트마다
+    개수가 달라도 자동으로 대응됨)을 모아 하나의 합성 '행'(새 <div> 컨테이너)으로
+    재구성한다. 원본 트리는 건드리지 않도록 각 <li>를 복사해서 붙인다."""
     for selector in config.COMMON_ROW_SELECTORS:
         rows = soup.select(selector)
         if rows:
             return rows
-    return []
+
+    title_lis = soup.select("li.title")
+    if not title_lis:
+        return []
+
+    import copy
+    synthetic_rows = []
+    for title_li in title_lis:
+        group = []
+        prev_sib = title_li.find_previous_sibling("li")
+        if prev_sib is not None and prev_sib not in title_lis:
+            group.append(prev_sib)
+        group.append(title_li)
+
+        sib = title_li.find_next_sibling("li")
+        while sib is not None and sib not in title_lis:
+            group.append(sib)
+            sib = sib.find_next_sibling("li")
+
+        wrapper = BeautifulSoup("<div></div>", "html.parser").div
+        for el in group:
+            wrapper.append(copy.copy(el))
+        synthetic_rows.append(wrapper)
+
+    return synthetic_rows
 
 
 def find_next_page_url(soup: BeautifulSoup, base_url: str, current_page_num: int) -> str | None:
