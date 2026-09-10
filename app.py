@@ -171,7 +171,9 @@ def render_notice_table(df: pd.DataFrame, key_prefix: str):
             return ["background-color: #cce5ff; color: #004080; font-weight: bold;"] * len(row)
         if status == "완료":
             return ["background-color: #f0f2f6; color: #a0aab2;"] * len(row)
-        if "안전점검" in title_text or "안전점검" in special_text:
+        # 안전점검 계열 핵심 키워드가 있으면 초록색으로 강조 표시 (공고제목/특이사항 둘 다 확인)
+        highlight_keywords = ["안전점검", "안전진단", "정밀점검", "정밀진단", "초기점검"]
+        if any(kw in title_text or kw in special_text for kw in highlight_keywords):
             return ["background-color: #e6ffe6; color: #006600; font-weight: bold;"] * len(row)
         return [""] * len(row)
 
