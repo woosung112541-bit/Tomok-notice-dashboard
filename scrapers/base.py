@@ -66,11 +66,13 @@ def _pick_title(row, anchor=None) -> str:
     사이트에서 <a> 태그 텍스트만 쓰면 번호만 저장되고 진짜 제목은 유실된다.
 
     그래서 <a> 텍스트 하나만 보지 않고, 같은 행의 모든 셀 텍스트를 후보로 모은
-    뒤 '공고/고시 제OOOO호' 형식만 담은 후보는 제외하고, 남은 것 중 가장 긴
-    (=가장 설명적인) 텍스트를 제목으로 고른다. 번호/날짜/담당부서 같은 다른
-    칸은 대개 짧아서 이 방식으로 자연스럽게 걸러진다. <a> 텍스트 자체가 이미
-    진짜 제목인 일반적인 경우에도, 대개 그게 가장 길기 때문에 그대로 선택되어
-    기존 사이트들의 동작은 그대로 유지된다.
+    뒤 '공고/고시 제OOOO호' 형식만 담은 후보와 순수 날짜(범위) 텍스트, 그리고
+    "첨부파일 ..."로 시작하는 파일목록 텍스트(실제로 대전 상수도사업본부에서
+    같은 공고가 첨부파일 목록을 제목처럼 달고 중복 저장되는 문제가 있었음)는
+    제외하고, 남은 것 중 가장 긴(=가장 설명적인) 텍스트를 제목으로 고른다.
+    번호/날짜/담당부서 같은 다른 칸은 대개 짧아서 이 방식으로 자연스럽게
+    걸러진다. <a> 텍스트 자체가 이미 진짜 제목인 일반적인 경우에도, 대개 그게
+    가장 길기 때문에 그대로 선택되어 기존 사이트들의 동작은 그대로 유지된다.
     """
     candidates = []
     if anchor is not None:
@@ -86,7 +88,8 @@ def _pick_title(row, anchor=None) -> str:
         return ""
 
     filtered = [c for c in candidates
-                if not _NOTICE_NUMBER_PATTERN.match(c) and not _DATE_ONLY_PATTERN.match(c)]
+                if not _NOTICE_NUMBER_PATTERN.match(c) and not _DATE_ONLY_PATTERN.match(c)
+                and not c.strip().startswith("첨부파일")]
     pool = filtered or candidates
     return max(pool, key=len)
 
