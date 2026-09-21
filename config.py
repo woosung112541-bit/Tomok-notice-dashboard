@@ -71,6 +71,12 @@ SHEET_EXCLUDED_NOTICES = "excluded_notices"  # 신규: 제외 키워드에 걸�
 SHEET_SITE_RESULTS = "site_results"  # 신규: "AI 전수조사 로그" - 성공/실패 관계없이 사이트별 결과
 SHEET_RUN_SUMMARY = "run_summary"    # 신규: "AI 전수조사 로그" - 실행 1회당 요약 1줄
 
+# 입찰나라(bidnara.com) 전용 - 기존 84곳 파싱과 완전히 독립적으로 동작하는 별도 시스템.
+# "🌐 입찰나라 통합검색" 메뉴 전용이며, 이 시트들은 기존 notices/manual_check 등과
+# 절대 섞이지 않는다.
+SHEET_BIDNARA_AGENCY = "bidnara_agency_notices"  # 기관별 공지사항
+SHEET_BIDNARA_BID = "bidnara_bid_notices"        # 입찰(나라장터 미러) - 기존 G2B 결과와 중복 아닌 것만
+
 # ── 입력 명부 엑셀 ───────────────────────────────────────────────────────────
 INPUT_EXCEL_FILENAME = "등록명부 정리시트.xlsx"
 ORG_NAME_COL_INDEX = 2   # '발주처' 열
@@ -212,6 +218,16 @@ SELENIUM_PAGE_LOAD_TIMEOUT = 45
 MAX_PAGINATION_SAFETY_CAP = 30
 MAX_WORKERS_LIGHT = 4   # requests 전용 사이트 동시 처리 수
 MAX_WORKERS_SELENIUM = 2  # Selenium을 쓰는 사이트는 메모리 문제로 동시 처리 수를 낮게 유지
+
+# ── 입찰나라(bidnara.com) 전용 설정 ──────────────────────────────────────────
+BIDNARA_BASE_URL = "https://bidnara.com"
+BIDNARA_AGENCY_LIST_URL = "https://bidnara.com/notices/agency-list"
+# ?search= 파라미터는 실제로는 서버에서 안 먹히는 것으로 확인됨(화면에서만 필터링하는
+# 자바스크립트 검색으로 추정) - 그래서 페이지를 하나씩 넘기면서 우리 쪽 키워드로
+# 직접 걸러내는 방식을 쓴다. 전체가 101페이지(약 2,000건)나 되지만, 최신순 정렬이라
+# 날짜 기반 중지 로직(page_has_stop_signal과 같은 원리)이 있으면 보통 몇 페이지 안에
+# 멈춘다 - 그래도 혹시 몰라 안전 상한을 걸어둔다.
+BIDNARA_MAX_PAGES = 20
 
 # 일부 관공서 사이트는 단순 "Mozilla/5.0" 같은 짧은 UA를 봇으로 간주해 차단한다.
 # 실제 브라우저와 가까운 완전한 UA 문자열을 공용으로 사용한다.

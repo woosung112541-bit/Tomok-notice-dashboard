@@ -12,6 +12,7 @@ import config
 import storage
 import site_registry
 import github_actions
+from scrapers import bidnara
 
 KST = timezone(timedelta(hours=9))
 
@@ -219,7 +220,7 @@ menu = st.sidebar.radio(
     "이동할 메뉴를 선택하세요:",
     ["공고 자동수집", "🔍 실패 로그 분석", "🔗 발주처 URL 관리",
      "공고 통계 및 분석", "🎯 타겟 공고 (내 업무)", "🚫 자동 제외된 공고",
-     "🗒️ 전수조사 로그 (AI 분석용)", "📝 게시판 / 메모장"],
+     "🗒️ 전수조사 로그 (AI 분석용)", "🌐 입찰나라 통합검색", "📝 게시판 / 메모장"],
 )
 st.sidebar.divider()
 
@@ -773,6 +774,76 @@ elif menu == "🗒️ 전수조사 로그 (AI 분석용)":
                 line += f" | 사유: {row.get('사유', '')}"
             lines.append(line)
         st.code("\n".join(lines), language=None)
+
+# ==========================================
+# 🌐 입찰나라 통합검색 (기존 84곳 파싱과 완전히 독립된 별도 시스템)
+# ==========================================
+elif menu == "🌐 입찰나라 통합검색":
+    st.title("🌐 입찰나라 통합검색")
+    st.info(
+        "이 메뉴는 기존 84곳 게시판 수집과 **완전히 독립적으로** 동작합니다. "
+        "입찰나라(bidnara.com)에서 두 가지를 가져옵니다:\n\n"
+        "- **기관별 공지사항**: 여러 기관의 자체 공지를 모아둔 페이지 (저희가 등록 안 해둔 기관까지 포함될 수 있음)\n"
+        "- **입찰 목록**: 사실상 나라장터 데이터를 그대로 보여주는 미러라서, "
+        "**이미 저희가 나라장터 API로 갖고 있는 것과 겹치지 않는 새 항목만** 골라서 보여드립니다."
+    )
+
+    col_days, col_kw = st.columns([1, 2])
+    with col_days:
+        bidnara_days = st.number_input("🗓️ 수집 기간 (최근 며칠)", min_value=0, max_value=90,
+                                        value=config.DEFAULT_DAYS_AGO, key="bidnara_days")
+    with col_kw:
+        bidnara_keywords_str = st.text_input("🔑 수집 키워드 (쉼표 구분, 기존 84곳과 별개로 설정 가능)",
+                                              value=", ".join(config.DEFAULT_KEYWORDS), key="bidnara_kw")
+
+    if st.button("🚀 입찰나라 지금 바로 수집", type="primary", use_container_width=True):
+        keywords = [k.strip() for k in bidnara_keywords_str.split(",") if k.strip()]
+        target_date_limit = datetime.now(KST) - timedelta(days=int(bidnara_days))
+        with st.status("입찰나라 수집 중...", expanded=True) as status:
+            try:
+                _, doc = storage.connect()
+
+                st.write("기관별 공지사항 확인 중...")
+                agency_results, agency_excluded = bidnara.fetch_agency_notices(keywords, target_date_limit)
+                agency_history = storage.load_bidnara_history_keys(doc, config.SHEET_BIDNARA_AGENCY)
+                now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+                added_agency = storage.append_bidnara_notices(
+                    doc, config.SHEET_BIDNARA_AGENCY, agency_results, agency_history, now_str)
+
+                st.write("입찰 목록(나라장터 미러) 확인 중 - 기존 보유 항목과 대조...")
+                existing_g2b_titles = storage.load_existing_g2b_titles(doc)
+                bid_results, bid_excluded = bidnara.fetch_bid_notices(keywords, target_date_limit, existing_g2b_titles)
+                bid_history = storage.load_bidnara_history_keys(doc, config.SHEET_BIDNARA_BID)
+                added_bid = storage.append_bidnara_notices(
+                    doc, config.SHEET_BIDNARA_BID, bid_results, bid_history, now_str)
+
+                get_google_sheet.clear()
+                status.update(
+                    label=f"✅ 완료 - 기관별 공지 신규 {added_agency}건 / 입찰(신규 미보유분) {added_bid}건 저장",
+                    state="complete")
+            except Exception as e:
+                status.update(label=f"❌ 오류: {e}", state="error")
+
+    st.divider()
+    tab_agency, tab_bid = st.tabs(["📋 기관별 공지사항", "📄 입찰 목록 (나라장터 미보유분)"])
+
+    with tab_agency:
+        st.subheader("🔍 검색")
+        agency_search = st.text_input("공고제목 / 발주기관 검색", key="agency_search")
+        df_agency = get_google_sheet(config.SHEET_BIDNARA_AGENCY)
+        if not df_agency.empty and agency_search:
+            mask = (df_agency["공고제목"].astype(str).str.contains(agency_search, case=False, na=False) |
+                    df_agency["출처"].astype(str).str.contains(agency_search, case=False, na=False))
+            df_agency = df_agency[mask]
+        render_notice_table(df_agency, "bidnara_agency")
+
+    with tab_bid:
+        st.subheader("🔍 검색")
+        bid_search = st.text_input("공고제목 검색", key="bid_search")
+        df_bid = get_google_sheet(config.SHEET_BIDNARA_BID)
+        if not df_bid.empty and bid_search:
+            df_bid = df_bid[df_bid["공고제목"].astype(str).str.contains(bid_search, case=False, na=False)]
+        render_notice_table(df_bid, "bidnara_bid")
 
 elif menu == "📝 게시판 / 메모장":
     st.title("📝 팀 게시판 및 메모장")

@@ -105,6 +105,49 @@ def append_notices(ws_notices, items: list[dict], history_keys: set, current_tim
     return len(new_rows)
 
 
+# ── 입찰나라(bidnara.com) 전용 - 기존 notices와 완전히 분리된 별도 저장소 ─────────
+_BIDNARA_HEADERS = ["출처", "등록일", "공고제목", "상세링크", "notice_key", "수집시각", "특이사항", "검토유무"]
+
+
+def load_bidnara_history_keys(doc, sheet_name: str) -> set:
+    """입찰나라 전용 시트(기관공지/입찰목록 둘 다 같은 구조)의 notice_key 집합을 불러온다."""
+    ws = _get_or_create_worksheet(doc, sheet_name, _BIDNARA_HEADERS)
+    return {str(r.get("notice_key", "")) for r in ws.get_all_records()}
+
+
+def load_existing_g2b_titles(doc) -> set:
+    """기존 notices 시트에서 '출처'에 (나라장터)가 붙은 것들의 제목만 뽑아온다.
+    입찰나라 '입찰' 목록(나라장터 미러) 수집 시, 이미 공식 G2B API로 갖고 있는
+    것과 대조해서 중복을 거르는 데 쓴다."""
+    ws = _get_or_create_worksheet(doc, config.SHEET_NOTICES,
+                                   ["출처", "등록일", "공고제목", "상세링크", "notice_key", "수집시각", "특이사항", "검토유무"])
+    titles = set()
+    for r in ws.get_all_records():
+        source = str(r.get("출처", ""))
+        if "나라장터" in source:
+            titles.add(str(r.get("공고제목", "")))
+    return titles
+
+
+def append_bidnara_notices(doc, sheet_name: str, items: list[dict], history_keys: set, current_time: str) -> int:
+    """입찰나라에서 수집한 공고를 전용 시트에 추가한다. 기존 84곳 notices 시트와는
+    완전히 별개의 탭이라 서로 절대 안 섞인다."""
+    ws = _get_or_create_worksheet(doc, sheet_name, _BIDNARA_HEADERS)
+    new_rows = []
+    for item in items:
+        notice_key = f"{item['출처']}|||{item['공고제목']}"
+        if notice_key in history_keys:
+            continue
+        new_rows.append([
+            item["출처"], item["등록일"], item["공고제목"], item["상세링크"],
+            notice_key, current_time, item.get("특이사항", "-"), "미검토",
+        ])
+        history_keys.add(notice_key)
+    if new_rows:
+        ws.append_rows(new_rows)
+    return len(new_rows)
+
+
 def load_excluded_history_keys(doc) -> set:
     """excluded_notices 탭에 이미 있는 notice_key 집합을 불러온다 (중복 재적재 방지)."""
     ws = _get_or_create_worksheet(doc, config.SHEET_EXCLUDED_NOTICES,
