@@ -27,16 +27,16 @@ KST = timezone(timedelta(hours=9))
 # 공공데이터포털 '활용신청 상세기능정보' 화면에서 직접 확인한 실제 End Point.
 # (예전 코드는 http://apis.data.go.kr/1230000/BidPublicInfoService04/ 를 썼는데,
 #  이 주소 자체가 존재하지 않아서 5개 오퍼레이션 전부 실패하고 있었다.)
-BASE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService"
+BASE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService02"
 
 # 마찬가지로 화면에서 직접 확인한 정확한 오퍼레이션명 (업무구분별 입찰공고목록조회 4개
 # + 어디에도 안 맞는 공고를 담는 '기타공고조회' 1개, 총 5개).
 ENDPOINTS = [
-    "getBidPblancListInfoCnstwk",  # 공사
-    "getBidPblancListInfoServc",   # 용역
-    "getBidPblancListInfoThng",    # 물품
-    "getBidPblancListInfoFrgcpt",  # 외자
-    "getBidPblancListInfoEtc",     # 기타공고 (4개 업무구분에 안 맞는 나머지)
+    "getBidPblancListInfoCnstwk02",  # 공사
+    "getBidPblancListInfoServc02",   # 용역
+    "getBidPblancListInfoThng02",    # 물품
+    "getBidPblancListInfoFrgcpt02",  # 외자
+    "getBidPblancListInfoEtc02",     # 기타공고 (4개 업무구분에 안 맞는 나머지)
 ]
 
 
