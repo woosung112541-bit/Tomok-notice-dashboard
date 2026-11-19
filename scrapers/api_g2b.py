@@ -3,15 +3,13 @@ scrapers/api_g2b.py
 ---------------------
 1순위(제미나이 원칙 #3): 공식 Open API가 있는 나라장터는 화면을 긁지 않고 API를 쓴다.
 
-업무구분(물품/용역/공사/외자 + 기타공고) 5가지 오퍼레이션을 모두 호출한다. 예전에는
-잘못된 주소(BidPublicInfoService04, /ad/ 경로 누락)와 지어낸 오퍼레이션명을 쓰고
-있어서 전부 "NO_OPENAPI_SERVICE_ERROR"로 실패하고 있었다 - 공공데이터포털의 실제
-'활용신청 상세기능정보' 화면에서 정확한 End Point와 오퍼레이션명을 확인해서 바로잡음.
+업무구분(물품/용역/공사/외자 + 기타공고) 5가지 오퍼레이션을 모두 호출한다.
+조달청_입찰공고정보서비스 OPEN API 변경안내(BidPublicInfoService02)에 맞춰
+BASE_URL 및 각 오퍼레이션명 뒤에 '02'를 반영하고, 응답 구조(dict/list/빈값) 및
+API 자체 에러 코드(header.resultCode)를 정확히 판별하도록 보강함.
 
 키워드 필터는 적용하지 않는다 (사용자 결정: "키워드 없이 전부 수집, 대신 대시보드
-에서 검색해서 보기"). 나라장터 정식 입찰공고 제목은 게시판 공지 제목과 달리
-"OO 교량 정밀안전진단 용역"처럼 실제 사업명이라 "모집" 같은 게시판용 키워드가
-애초에 거의 안 맞는다 - 잘못 거르느니 전부 가져와서 대시보드 검색으로 보게 한다.
+에서 검색해서 보기").
 """
 
 from datetime import datetime, timezone, timedelta
@@ -24,13 +22,10 @@ from utils.logging_setup import log_failure, log_system_note
 
 KST = timezone(timedelta(hours=9))
 
-# 공공데이터포털 '활용신청 상세기능정보' 화면에서 직접 확인한 실제 End Point.
-# (예전 코드는 http://apis.data.go.kr/1230000/BidPublicInfoService04/ 를 썼는데,
-#  이 주소 자체가 존재하지 않아서 5개 오퍼레이션 전부 실패하고 있었다.)
+# 변경된 조달청 입찰공고정보서비스 End Point (02 버전)
 BASE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService02"
 
-# 마찬가지로 화면에서 직접 확인한 정확한 오퍼레이션명 (업무구분별 입찰공고목록조회 4개
-# + 어디에도 안 맞는 공고를 담는 '기타공고조회' 1개, 총 5개).
+# 변경된 오퍼레이션명 (각 서비스명 뒤에 '02' 추가)
 ENDPOINTS = [
     "getBidPblancListInfoCnstwk02",  # 공사
     "getBidPblancListInfoServc02",   # 용역
@@ -46,10 +41,6 @@ def fetch(api_key: str, days_ago: int) -> tuple[list[dict], list[dict]]:
         log_failure("나라장터", "-", "config", "G2B_API_KEY 시크릿이 설정되지 않음")
         return [], []
 
-    # 공공데이터포털(data.go.kr) 서비스키를 'Encoding' 버전으로 저장해두면,
-    # requests가 params로 넘길 때 다시 한 번 URL 인코딩을 해서 '%'가 이중으로 인코딩되고
-    # 서버가 HTTP 400(잘못된 요청)으로 거부한다. 이미 인코딩된 키를 넣었더라도
-    # 한 번 디코딩해서 넘기면 정상 동작한다 (디코딩 키를 넣은 경우는 그대로 통과됨).
     api_key = unquote(api_key)
 
     now = datetime.now(KST)
@@ -63,17 +54,46 @@ def fetch(api_key: str, days_ago: int) -> tuple[list[dict], list[dict]]:
     for endpoint in ENDPOINTS:
         url = f"{BASE_URL}/{endpoint}"
         params = {
-            "serviceKey": api_key, "numOfRows": "999", "pageNo": "1",
-            "inqryDiv": "1", "inqryBgnDt": start_dt, "inqryEndDt": end_dt, "type": "json",
+            "serviceKey": api_key,
+            "numOfRows": "999",
+            "pageNo": "1",
+            "inqryDiv": "1",
+            "inqryBgnDt": start_dt,
+            "inqryEndDt": end_dt,
+            "type": "json",
         }
         try:
             res = requests.get(url, params=params, timeout=30)
             if res.status_code != 200:
                 log_failure("나라장터", url, "fetch", f"HTTP {res.status_code} - {res.text[:200]}")
                 continue
-            items = res.json().get("response", {}).get("body", {}).get("items", [])
+
+            data = res.json()
+            header = data.get("response", {}).get("header", {})
+            if header.get("resultCode") != "00":
+                log_failure(
+                    "나라장터",
+                    url,
+                    "api_error",
+                    f"[{header.get('resultCode')}] {header.get('resultMsg')}",
+                )
+                continue
+
+            raw_items = data.get("response", {}).get("body", {}).get("items")
+            if not raw_items:
+                items = []
+            elif isinstance(raw_items, dict):
+                items = raw_items.get("item", [])
+                if isinstance(items, dict):
+                    items = [items]
+            elif isinstance(raw_items, list):
+                items = raw_items
+            else:
+                items = []
+
         except Exception as e:
-            log_failure("나라장터", url, "fetch", e)
+            raw_text = res.text[:200] if "res" in locals() else "응답없음"
+            log_failure("나라장터", url, "fetch", f"{e} | 응답원문: {raw_text}")
             continue
 
         log_system_note("g2b_endpoint", f"{endpoint}: {len(items)}건 수신")
